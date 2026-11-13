@@ -148,28 +148,28 @@ export function finishedText(line: FinishedLine): string {
 }
 
 /** A job still running, or one whose file does not hold a progress line. */
-export type ActiveJob = Job & { readonly line: RunningLine | null }
+export type UnfinishedJob = Job & { readonly line: RunningLine | null }
 export type FinishedJob = Job & { readonly line: FinishedLine }
 
 /**
- * Splits jobs for the pane. Running and unreadable jobs are active, in the
+ * Splits jobs for the pane. Running and unreadable jobs are unfinished, in the
  * order given. Of the finished, only those that ended in or after the
  * session's first second show, newest first, at most MAX_SHOWN_FINISHED_JOBS.
  */
 export function shownJobs(
   jobs: readonly Job[],
   sessionStartedMs: number,
-): { active: readonly ActiveJob[]; finished: readonly FinishedJob[] } {
+): { unfinished: readonly UnfinishedJob[]; finished: readonly FinishedJob[] } {
   const sessionStartedSec = Math.floor(sessionStartedMs / MS_PER_SECOND)
-  const active = jobs.filter(isActive)
+  const unfinished = jobs.filter(isUnfinished)
   const finished = jobs
     .filter(isFinished)
     .filter(job => job.line.endedSec >= sessionStartedSec)
     .sort((a, b) => b.line.endedSec - a.line.endedSec)
-  return { active, finished: finished.slice(0, MAX_SHOWN_FINISHED_JOBS) }
+  return { unfinished, finished: finished.slice(0, MAX_SHOWN_FINISHED_JOBS) }
 }
 
-function isActive(job: Job): job is ActiveJob {
+function isUnfinished(job: Job): job is UnfinishedJob {
   return job.line?.kind !== 'finished'
 }
 

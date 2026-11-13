@@ -239,9 +239,9 @@ describe('shownJobs', () => {
   const finished = (script: string, endedSec: number, exitCode = 0): Job =>
     job(script, { kind: 'finished', startedSec: 1_699_999_000, exitCode, endedSec })
 
-  test('keeps running and unreadable jobs active, in the order given', () => {
+  test('keeps running and unreadable jobs unfinished, in the order given', () => {
     const jobs = [job('build.sh', running(1, 2)), job('odd.sh', null), job('sync.sh', running(0, 0))]
-    expect(shownJobs(jobs, SESSION_STARTED_MS)).toEqual({ active: jobs, finished: [] })
+    expect(shownJobs(jobs, SESSION_STARTED_MS)).toEqual({ unfinished: jobs, finished: [] })
   })
 
   test('hides jobs that finished before the session started', () => {
