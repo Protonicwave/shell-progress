@@ -7,6 +7,7 @@ import { pollJobs } from './poll'
 import { jobStatus, statusSummary } from './progress'
 
 const POLL_INTERVAL_MS = 500
+const COMMAND_NAME = 'progress'
 const MS_PER_MINUTE = 60_000
 
 // Change the tag when Job's fields change: it declines what an earlier
@@ -22,8 +23,21 @@ export const register: Register = (on, options) => {
   const stallMs = stallMinutesOf(options) * MS_PER_MINUTE
 
   on('session.start', async ($, e, next) => {
+    await $.command.register({
+      name: COMMAND_NAME,
+      description: 'Show the background jobs pane',
+    })
     startPolling($, await progressDir($), stallMs)
     return next(e)
+  })
+
+  on('command.run', { command: COMMAND_NAME }, async $ => {
+    const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
+    return {
+      text: opened.isPlaced
+        ? `${PANE_TITLE} pane opened.`
+        : `${PANE_TITLE} pane opened but not shown: ${opened.reason}`,
+    }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {

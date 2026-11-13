@@ -23,6 +23,15 @@ const PANE = {
 const finishedLine = (exitCode: number, seconds: number) =>
   `${STARTED_SEC} done ${exitCode} ${STARTED_SEC + seconds}\n`
 
+async function runProgressCommand($: Engine) {
+  return $.command.run({
+    command: 'progress',
+    args: '',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: true, columns: 160 },
+  })
+}
+
 async function mountPane($: Engine) {
   return $.ui.mount({ ...PANE, surface: 'terminal' })
 }
@@ -140,4 +149,22 @@ test('a long label is cut at the edge of the pane', async ($, on) => {
   const row = await ui.find({ type: 'Text', text: label })
   expect(row?.props['wrap']).toBe('truncate-end')
   await ui.unmount()
+})
+
+test('/progress opens the pane', async ($, on) => {
+  const { world } = fakeWorld(on, new Map())
+  await startSession($)
+
+  const result = await runProgressCommand($)
+  expect(world.opens).toEqual(['shell-progress'])
+  expect(result.text).toBe('Background jobs pane opened.')
+})
+
+test('/progress says why the pane is not shown where nothing can draw it', async ($, on) => {
+  const { world } = fakeWorld(on, new Map())
+  world.openResult = { isPlaced: false, reason: 'no-surface: none is attached' }
+  await startSession($)
+
+  const result = await runProgressCommand($)
+  expect(result.text).toBe('Background jobs pane opened but not shown: no-surface: none is attached')
 })

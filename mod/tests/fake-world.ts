@@ -1,6 +1,6 @@
 import { expect, mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On, SessionUsage } from 'claude-code'
+import type { On, SessionUsage, UiOpenResult } from 'claude-code'
 
 const DIR = '/work/progress'
 // The engine hands paths on in the platform's form, a drive letter and
@@ -25,6 +25,8 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     statuses: [] as (string | undefined)[],
     logs: [] as string[],
     opens: [] as string[],
+    /** What each `$.ui.open` answers; a test may change it. */
+    openResult: { isPlaced: true } as UiOpenResult,
   }
   const clock = mock.clock(on, { now: START_MS })
   mock.env(on, { CLAUDE_PROGRESS_DIR: DIR })
@@ -56,9 +58,10 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     return { value: undefined }
   })
   on('session.usage', () => ({ value: { startedAt: START_MS } as SessionUsage }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('ui.open', (_, e) => {
     world.opens.push(e.id)
-    return { value: { isPlaced: true } }
+    return { value: world.openResult }
   })
   on('ui.log', (_, e) => {
     world.logs.push(e.text)
