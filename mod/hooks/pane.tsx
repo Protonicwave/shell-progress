@@ -2,7 +2,7 @@ import type { Color, Elements, RenderNode } from 'claude-code'
 
 import type { Job } from '../types'
 import type { UnfinishedJob, FinishedJob, RunningLine } from './progress'
-import { barText, durationText, finishedText, isStalled, shownJobs } from './progress'
+import { MS_PER_SECOND, barText, durationText, finishedText, isStalled, shownJobs } from './progress'
 
 export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'Background jobs'
@@ -10,7 +10,6 @@ export const PANE_TITLE = 'Background jobs'
 const MAX_BAR_CELLS = 40
 // Columns kept clear to the right of the bar.
 const BAR_GAP_COLUMNS = 2
-const MS_PER_SECOND = 1000
 const SPINNER_FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 // The pane is redrawn on each poll while a job runs, so the spinner turns
 // one frame per poll.
@@ -83,7 +82,7 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
 
   const line = job.line
   const hasStalled = isStalled(job, view.nowMs, view.stallMs)
-  const elapsed = durationText((view.nowMs - line.startedSec * MS_PER_SECOND) / MS_PER_SECOND)
+  const elapsed = durationText(view.nowMs / MS_PER_SECOND - line.startedSec)
   const time = hasStalled ? (
     <Text color={STALLED_COLOUR}>stalled {elapsed}</Text>
   ) : (
