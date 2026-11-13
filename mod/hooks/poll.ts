@@ -3,6 +3,7 @@ import type { EngineInterface, FsEntry } from 'claude-code'
 import type { Job } from '../types'
 import { parseProgressLine } from './progress'
 
+export const POLL_INTERVAL_MS = 500
 const MAX_READS_PER_POLL = 20
 const MAX_TRACKED_FILES = 200
 // A progress line is a few dozen bytes; a larger file is not one, so it is

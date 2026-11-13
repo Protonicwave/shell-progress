@@ -3,10 +3,9 @@ import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
 import type { Job } from '../types'
 import { PANE_ID, PANE_TITLE, drawPane } from './pane'
-import { pollJobs } from './poll'
+import { POLL_INTERVAL_MS, pollJobs } from './poll'
 import { isStalled, statusSummary } from './progress'
 
-const POLL_INTERVAL_MS = 500
 const COMMAND_NAME = 'progress'
 const MS_PER_MINUTE = 60_000
 

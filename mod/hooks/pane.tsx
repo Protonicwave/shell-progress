@@ -1,7 +1,8 @@
 import type { Color, Elements, RenderNode } from 'claude-code'
 
 import type { Job } from '../types'
-import type { UnfinishedJob, FinishedJob, RunningLine } from './progress'
+import { POLL_INTERVAL_MS } from './poll'
+import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
 import { MS_PER_SECOND, barText, durationText, finishedText, isStalled, shownJobs } from './progress'
 
 export const PANE_ID = 'shell-progress'
@@ -13,7 +14,7 @@ const BAR_GAP_COLUMNS = 2
 const SPINNER_FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 // The pane is redrawn on each poll while a job runs, so the spinner turns
 // one frame per poll.
-const SPINNER_FRAME_MS = 500
+const SPINNER_FRAME_MS = POLL_INTERVAL_MS
 
 const BAR_COLOUR: Color = 'claude'
 const STALLED_COLOUR: Color = 'warning'
