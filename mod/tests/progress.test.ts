@@ -5,7 +5,7 @@ import {
   barText,
   durationText,
   finishedText,
-  jobStatus,
+  isStalled,
   parseProgressLine,
   shownJobs,
   statusSummary,
@@ -100,42 +100,29 @@ describe('parseProgressLine', () => {
   }
 })
 
-describe('jobStatus', () => {
-  test('a counted line is running', () => {
-    expect(jobStatus(job('build.sh', running(1, 3)), NOW_MS, STALL_MS)).toBe('running')
-  })
-
-  test('a line with total 0 has no step count', () => {
-    expect(jobStatus(job('sync.sh', running(0, 0)), NOW_MS, STALL_MS)).toBe('no-step-count')
-  })
-
+describe('isStalled', () => {
   test('a running job is not stalled just before the threshold', () => {
     const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS + 1)
-    expect(jobStatus(quiet, NOW_MS, STALL_MS)).toBe('running')
+    expect(isStalled(quiet, NOW_MS, STALL_MS)).toBe(false)
   })
 
   test('a running job is stalled once its file is unchanged for the threshold', () => {
     const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS)
-    expect(jobStatus(quiet, NOW_MS, STALL_MS)).toBe('stalled')
+    expect(isStalled(quiet, NOW_MS, STALL_MS)).toBe(true)
   })
 
   test('a job with no step count stalls too', () => {
     const quiet = job('sync.sh', running(0, 0), NOW_MS - STALL_MS)
-    expect(jobStatus(quiet, NOW_MS, STALL_MS)).toBe('stalled')
+    expect(isStalled(quiet, NOW_MS, STALL_MS)).toBe(true)
   })
 
-  test('exit code 0 is done', () => {
-    const line = parseProgressLine('1700000000 done 0 1700000060')
-    expect(jobStatus(job('lint.sh', line, 0), NOW_MS, STALL_MS)).toBe('done')
-  })
-
-  test('a non-zero exit code is failed, however old', () => {
+  test('a finished job never stalls, however old', () => {
     const line = parseProgressLine('1700000000 done -1 1700000060')
-    expect(jobStatus(job('migrate.sh', line, 0), NOW_MS, STALL_MS)).toBe('failed')
+    expect(isStalled(job('migrate.sh', line, 0), NOW_MS, STALL_MS)).toBe(false)
   })
 
-  test('a line that does not parse is unreadable', () => {
-    expect(jobStatus(job('odd.sh', null), NOW_MS, STALL_MS)).toBe('unreadable')
+  test('an unreadable job never stalls', () => {
+    expect(isStalled(job('odd.sh', null, 0), NOW_MS, STALL_MS)).toBe(false)
   })
 })
 

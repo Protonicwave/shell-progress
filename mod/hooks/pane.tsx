@@ -2,7 +2,7 @@ import type { Color, Elements, RenderNode } from 'claude-code'
 
 import type { Job } from '../types'
 import type { ActiveJob, FinishedJob, RunningLine } from './progress'
-import { barText, durationText, finishedText, jobStatus, shownJobs } from './progress'
+import { barText, durationText, finishedText, isStalled, shownJobs } from './progress'
 
 export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'Background jobs'
@@ -75,16 +75,16 @@ function activeRows(ui: PaneElements, view: PaneView, job: ActiveJob): RenderNod
   }
 
   const line = job.line
-  const isStalled = jobStatus(job, view.nowMs, view.stallMs) === 'stalled'
+  const hasStalled = isStalled(job, view.nowMs, view.stallMs)
   const elapsed = durationText((view.nowMs - line.startedSec * MS_PER_SECOND) / MS_PER_SECOND)
-  const time = isStalled ? (
+  const time = hasStalled ? (
     <Text color={STALLED_COLOUR}>stalled {elapsed}</Text>
   ) : (
     <Text dimColor>{elapsed}</Text>
   )
 
   if (line.total === 0) {
-    const glyph = isStalled
+    const glyph = hasStalled
       ? <Text dimColor>·</Text>
       : <Text color={BAR_COLOUR}>{spinnerFrame(view.nowMs)}</Text>
     return [
@@ -95,7 +95,7 @@ function activeRows(ui: PaneElements, view: PaneView, job: ActiveJob): RenderNod
 
   return [
     spreadRow(ui, name, <Text>{stepText(line)}</Text>),
-    barRow(ui, line, barCellsFor(view.bodyColumns), isStalled),
+    barRow(ui, line, barCellsFor(view.bodyColumns), hasStalled),
     spreadRow(ui, <Text dimColor>{line.label}</Text>, time),
   ]
 }

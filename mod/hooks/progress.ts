@@ -3,14 +3,6 @@ import type { Job, ProgressLine } from '../types'
 export type RunningLine = ProgressLine & { kind: 'running' }
 type FinishedLine = ProgressLine & { kind: 'finished' }
 
-export type JobStatus =
-  | 'running'
-  | 'no-step-count'
-  | 'stalled'
-  | 'done'
-  | 'failed'
-  | 'unreadable'
-
 const SUMMARY_MAX_NAMED_JOBS = 2
 const MAX_SHOWN_FINISHED_JOBS = 5
 const SECONDS_PER_MINUTE = 60
@@ -67,15 +59,11 @@ function numericFields(match: RegExpExecArray): readonly [number, number, number
 }
 
 /**
- * Classifies a job at `nowMs`. A running job whose file has not changed for
- * `stallMs` is stalled, which is how a killed script shows.
+ * Whether a running job's file has gone unchanged for `stallMs` at `nowMs`,
+ * which is how a killed script shows. A finished or unreadable job never stalls.
  */
-export function jobStatus(job: Job, nowMs: number, stallMs: number): JobStatus {
-  const { line } = job
-  if (line === null) return 'unreadable'
-  if (line.kind === 'finished') return line.exitCode === 0 ? 'done' : 'failed'
-  if (nowMs - job.mtimeMs >= stallMs) return 'stalled'
-  return line.total === 0 ? 'no-step-count' : 'running'
+export function isStalled(job: Job, nowMs: number, stallMs: number): boolean {
+  return job.line?.kind === 'running' && nowMs - job.mtimeMs >= stallMs
 }
 
 /**
@@ -105,7 +93,7 @@ function runningState(
   nowMs: number,
   stallMs: number,
 ): string {
-  if (jobStatus(job, nowMs, stallMs) === 'stalled') return 'stalled'
+  if (isStalled(job, nowMs, stallMs)) return 'stalled'
   if (line.total === 0) return 'running'
   return `${Math.round((line.step / line.total) * 100)}%`
 }
