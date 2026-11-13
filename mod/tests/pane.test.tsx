@@ -338,6 +338,27 @@ test('dismissed stalled and finished jobs are stored, counted as hidden and show
   await ui.unmount()
 })
 
+test('a dismissed stalled job leaves the status line and comes back with the hidden jobs', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['build.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS - 120_000 }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+  expect(world.statuses).toEqual(['build stalled'])
+
+  const ui = await mountPane($)
+  await ui.press({ key: 'build.sh-1.txt' })
+  await ui.press({ key: 'dismiss:build.sh-1.txt' })
+  await clock.advance(POLL_MS)
+  expect(world.statuses).toEqual(['build stalled', undefined])
+
+  await ui.press({ key: 'show-hidden' })
+  await clock.advance(POLL_MS)
+  expect(world.statuses).toEqual(['build stalled', undefined, 'build stalled'])
+  await ui.unmount()
+})
+
 test('a job dismissed in an earlier session stays hidden', async ($, on) => {
   const files = new Map<string, FakeFile>([
     ['lint.sh-2.txt', { text: finishedLine(0, 22), mtimeMs: START_MS }],

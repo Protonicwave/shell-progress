@@ -116,8 +116,8 @@ A script killed before it could write its finished line, by `kill -9`, Task
 Manager or `Stop-Process`, or a PowerShell script with no `finally` block,
 leaves a running file that nothing removes. The mod shows it as stalled, in
 the pane and on the status line, in every session until the file is deleted
-from the progress directory by hand. Dismissing it in the pane takes it out of
-the pane in every session, but not off the status line.
+from the progress directory by hand, or until it is dismissed in the pane,
+which takes it off both the pane and the status line in every session.
 
 ## The mod
 

@@ -4,7 +4,7 @@ import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 import type { Job } from '../types'
 import { PANE_ID, PANE_TITLE, drawPane } from './pane'
 import { POLL_INTERVAL_MS, pollJobs } from './poll'
-import { isStalled, statusSummary } from './progress'
+import { dismissalKey, isStalled, statusSummary } from './progress'
 
 const COMMAND_NAME = 'progress'
 // A poll still running after this long is logged, once, as stuck.
@@ -177,15 +177,18 @@ async function pollOnce(
   const current = await pollJobs($, dir, previous)
   if (current !== previous) await update($, jobs, () => current)
 
+  // A dismissed job is gone from everything the poll drives, not only the pane.
+  const dismissed = new Set(await read($, dismissedJobs))
+  const shown = current.filter(job => !dismissed.has(dismissalKey(job) ?? ''))
   const nowMs = await $.clock.now()
-  const isAnyLive = current.some(job => isLive(job, nowMs, stallMs))
+  const isAnyLive = shown.some(job => isLive(job, nowMs, stallMs))
   if (isAnyLive && !(await read($, hasOpenedPane))) await openPaneOnce($)
 
   // A running job's elapsed time and spinner move on every poll even when no
   // file changed, so the pane is drawn again while one runs. A stalled job's
   // row does not move, so it alone does not keep the pane redrawing.
   if (isAnyLive) $.ui.invalidate('ui.render')
-  return statusSummary(current, nowMs, stallMs)
+  return statusSummary(shown, nowMs, stallMs)
 }
 
 function isLive(job: Job, nowMs: number, stallMs: number): boolean {
