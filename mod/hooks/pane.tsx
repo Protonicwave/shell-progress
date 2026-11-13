@@ -44,7 +44,7 @@ export function drawPane(ui: PaneElements, view: PaneView) {
 
   return (
     <Box flexDirection="column">
-      {spreadRow(ui, <Text bold>{PANE_TITLE}</Text>, count && <Text dimColor>{count}</Text>)}
+      {spreadRow(ui, <Text bold>{PANE_TITLE}</Text>, count === undefined ? undefined : <Text dimColor>{count}</Text>)}
       {active.length === 0 && finished.length === 0 && (
         <Text dimColor>No jobs yet. A script that sources the helpers shows here.</Text>
       )}
@@ -65,9 +65,13 @@ export function drawPane(ui: PaneElements, view: PaneView) {
   )
 }
 
-function countText(runningCount: number, activeCount: number, finishedCount: number): string {
+function countText(
+  runningCount: number,
+  activeCount: number,
+  finishedCount: number,
+): string | undefined {
   if (runningCount > 0) return `${runningCount} running`
-  return activeCount === 0 && finishedCount > 0 ? 'all finished' : ''
+  return activeCount === 0 && finishedCount > 0 ? 'all finished' : undefined
 }
 
 function activeRows(ui: PaneElements, view: PaneView, job: ActiveJob): RenderNode[] {
@@ -132,11 +136,11 @@ function finishedRow(ui: PaneElements, job: FinishedJob) {
  * One row with `left` cut by an ellipsis where it would meet `right`, which
  * keeps its full width.
  */
-function spreadRow({ Box, Text }: PaneElements, left: RenderNode, right: RenderNode | '') {
+function spreadRow({ Box, Text }: PaneElements, left: RenderNode, right?: RenderNode) {
   return (
     <Box justifyContent="space-between" gap={2}>
       <Text wrap="truncate-end">{left}</Text>
-      {right !== '' && <Box flexShrink={0}>{right}</Box>}
+      {right !== undefined && <Box flexShrink={0}>{right}</Box>}
     </Box>
   )
 }
