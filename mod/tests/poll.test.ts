@@ -195,3 +195,23 @@ test('a new file that cannot be read is read again only once it changes', async 
   expect(world.reads).toEqual(['secret.sh-1.txt', 'secret.sh-1.txt'])
   expect(world.statuses).toEqual([undefined, 'secret 50%'])
 })
+
+test('the pane is redrawn on each poll while a job runs, and not for a stalled one', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['old.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS - 120_000 }],
+  ])
+  let redraws = 0
+  on('ui.invalidate', () => {
+    redraws += 1
+    return { value: undefined }
+  })
+  const { clock } = fakeWorld(on, files)
+  await startSession($)
+
+  await clock.advance(POLL_MS * 3)
+  expect(redraws).toBe(0)
+
+  files.set('build.sh-11.txt', { text: runningLine(1, 2), mtimeMs: START_MS })
+  await clock.advance(POLL_MS * 2)
+  expect(redraws).toBe(2)
+})

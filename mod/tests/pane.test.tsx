@@ -122,17 +122,17 @@ test('a job that finished before the session started is not drawn', async ($, on
   await ui.unmount()
 })
 
-test('a stalled job says so beside its elapsed time', { options: { stallMinutes: 1 } }, async ($, on) => {
+test('a stalled job says how long it ran before its file went quiet', { options: { stallMinutes: 1 } }, async ($, on) => {
   const files = new Map<string, FakeFile>([
-    ['build.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS }],
+    ['build.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS + 30_000 }],
   ])
   const { clock } = fakeWorld(on, files)
   await startSession($)
-  await clock.advance(60_000)
+  await clock.advance(90_000)
 
   const ui = await mountPane($)
   const stalled = await ui.find({ type: 'Text', text: /^stalled/ })
-  expect(stalled?.text).toBe('stalled 1m 00s')
+  expect(stalled?.text).toBe('stalled after 0m 30s')
   expect(stalled?.props['color']).toBe('warning')
   await ui.unmount()
 })

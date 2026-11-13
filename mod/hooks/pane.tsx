@@ -83,11 +83,14 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
 
   const line = job.line
   const hasStalled = isStalled(job, view.nowMs, view.stallMs)
-  const elapsed = durationText(view.nowMs / MS_PER_SECOND - line.startedSec)
+  // A stalled row gives how long the job ran before its file went quiet, which
+  // stays put, so the pane need not be redrawn for it.
   const time = hasStalled ? (
-    <Text color={STALLED_COLOUR}>stalled {elapsed}</Text>
+    <Text color={STALLED_COLOUR}>
+      stalled after {durationText(job.mtimeMs / MS_PER_SECOND - line.startedSec)}
+    </Text>
   ) : (
-    <Text dimColor>{elapsed}</Text>
+    <Text dimColor>{durationText(view.nowMs / MS_PER_SECOND - line.startedSec)}</Text>
   )
 
   if (line.total === 0) {

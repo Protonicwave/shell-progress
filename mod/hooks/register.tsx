@@ -117,11 +117,11 @@ async function pollOnce(
   const isAnyLive = current.some(job => isLive(job, nowMs, stallMs))
   if (isAnyLive && !(await read($, hasOpenedPane))) await openPaneOnce($)
 
-  const summary = statusSummary(current, nowMs, stallMs)
   // A running job's elapsed time and spinner move on every poll even when no
-  // file changed, so the pane is drawn again while one runs.
-  if (summary !== undefined) $.ui.invalidate('ui.render')
-  return summary
+  // file changed, so the pane is drawn again while one runs. A stalled job's
+  // row does not move, so it alone does not keep the pane redrawing.
+  if (isAnyLive) $.ui.invalidate('ui.render')
+  return statusSummary(current, nowMs, stallMs)
 }
 
 function isLive(job: Job, nowMs: number, stallMs: number): boolean {
