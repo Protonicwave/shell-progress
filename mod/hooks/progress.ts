@@ -5,6 +5,10 @@ type FinishedLine = ProgressLine & { kind: 'finished' }
 
 const SUMMARY_MAX_NAMED_JOBS = 2
 const MAX_SHOWN_FINISHED_JOBS = 5
+// Before this step, the average time per step rests on too few steps to say.
+const FIRST_ESTIMATED_STEP = 3
+// An estimate finer than this claims more than an average of steps can know.
+const REMAINING_ROUNDING_SECONDS = 5
 const SECONDS_PER_MINUTE = 60
 const SECONDS_PER_HOUR = 3600
 export const MS_PER_SECOND = 1000
@@ -137,6 +141,28 @@ export function durationText(seconds: number): string {
 
 function twoDigits(value: number): string {
   return String(value).padStart(2, '0')
+}
+
+/**
+ * The seconds a running job has left at `nowMs`, from its average time per
+ * step so far. `undefined` for a job with no step count or before step
+ * FIRST_ESTIMATED_STEP.
+ */
+export function remainingSeconds(line: RunningLine, nowMs: number): number | undefined {
+  if (line.total === 0 || line.step < FIRST_ESTIMATED_STEP) return undefined
+  const elapsedSec = Math.max(0, nowMs / MS_PER_SECOND - line.startedSec)
+  return (elapsedSec / line.step) * (line.total - line.step)
+}
+
+/** `about 25s left` below a minute, otherwise as `durationText`; never under 5 seconds. */
+export function remainingText(seconds: number): string {
+  const rounded = Math.max(
+    REMAINING_ROUNDING_SECONDS,
+    Math.round(seconds / REMAINING_ROUNDING_SECONDS) * REMAINING_ROUNDING_SECONDS,
+  )
+  return rounded < SECONDS_PER_MINUTE
+    ? `about ${rounded}s left`
+    : `about ${durationText(rounded)} left`
 }
 
 /** `done in 0m 22s`, or `failed after 1m 04s, exit 1`. */

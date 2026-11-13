@@ -7,9 +7,12 @@ import {
   finishedText,
   isStalled,
   parseProgressLine,
+  remainingSeconds,
+  remainingText,
   shownJobs,
   statusSummary,
 } from '../hooks/progress'
+import type { RunningLine } from '../hooks/progress'
 
 const STALL_MS = 10 * 60_000
 const NOW_MS = 1_700_000_100_000
@@ -18,7 +21,7 @@ const running = (
   step: number,
   total: number,
   label = '',
-): ProgressLine => ({ kind: 'running', startedSec: 1_700_000_000, step, total, label })
+): RunningLine => ({ kind: 'running', startedSec: 1_700_000_000, step, total, label })
 
 const job = (script: string, line: ProgressLine | null, mtimeMs = NOW_MS): Job => ({
   file: `${script}-1.txt`,
@@ -231,6 +234,45 @@ describe('finishedText', () => {
     expect(finishedText({ kind: 'finished', startedSec: 100, exitCode: -1, endedSec: 164 })).toBe(
       'failed after 1m 04s, exit -1',
     )
+  })
+})
+
+describe('remainingSeconds', () => {
+  // NOW_MS is 100 s after `running`'s start.
+  test('gives none before the third step', () => {
+    expect(remainingSeconds(running(2, 10), NOW_MS)).toBeUndefined()
+  })
+
+  test('gives none for a job with no step count', () => {
+    expect(remainingSeconds(running(5, 0), NOW_MS)).toBeUndefined()
+  })
+
+  test('takes the average time per step so far over the steps left', () => {
+    expect(remainingSeconds(running(4, 10), NOW_MS)).toBe(150)
+  })
+
+  test('gives none left at the last step', () => {
+    expect(remainingSeconds(running(10, 10), NOW_MS)).toBe(0)
+  })
+
+  test('counts a start in the future as no time spent', () => {
+    expect(remainingSeconds(running(4, 10), 1_699_999_990_000)).toBe(0)
+  })
+})
+
+describe('remainingText', () => {
+  test('rounds to the nearest 5 seconds', () => {
+    expect(remainingText(23)).toBe('about 25s left')
+    expect(remainingText(150)).toBe('about 2m 30s left')
+  })
+
+  test('never says less than 5 seconds', () => {
+    expect(remainingText(0)).toBe('about 5s left')
+  })
+
+  test('gives minutes from 60 seconds and hours from an hour', () => {
+    expect(remainingText(58)).toBe('about 1m 00s left')
+    expect(remainingText(7_505)).toBe('about 2h 05m left')
   })
 })
 

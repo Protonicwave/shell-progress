@@ -3,7 +3,16 @@ import type { Color, Elements, RenderNode } from 'claude-code'
 import type { Job } from '../types'
 import { POLL_INTERVAL_MS } from './poll'
 import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
-import { MS_PER_SECOND, barText, durationText, finishedText, isStalled, shownJobs } from './progress'
+import {
+  MS_PER_SECOND,
+  barText,
+  durationText,
+  finishedText,
+  isStalled,
+  remainingSeconds,
+  remainingText,
+  shownJobs,
+} from './progress'
 
 export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'Background jobs'
@@ -90,7 +99,7 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
       stalled after {durationText(job.mtimeMs / MS_PER_SECOND - line.startedSec)}
     </Text>
   ) : (
-    <Text dimColor>{durationText(view.nowMs / MS_PER_SECOND - line.startedSec)}</Text>
+    <Text dimColor>{runningTimeText(line, view.nowMs)}</Text>
   )
 
   if (line.total === 0) {
@@ -108,6 +117,13 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
     barRow(ui, line, barCellsFor(view.bodyColumns), hasStalled),
     spreadRow(ui, <Text dimColor>{line.label}</Text>, time),
   ]
+}
+
+/** `1m 12s`, and from the third step `1m 12s · about 25s left`. */
+function runningTimeText(line: RunningLine, nowMs: number): string {
+  const elapsed = durationText(nowMs / MS_PER_SECOND - line.startedSec)
+  const remaining = remainingSeconds(line, nowMs)
+  return remaining === undefined ? elapsed : `${elapsed} · ${remainingText(remaining)}`
 }
 
 function stepText(line: RunningLine): string {

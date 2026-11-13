@@ -215,3 +215,17 @@ test('a new file that cannot be read shows as unreadable', async ($, on) => {
   )
   await ui.unmount()
 })
+
+test('a running job says about how long it has left from its third step', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['build.sh-1.txt', { text: runningLine(4, 10), mtimeMs: START_MS }],
+  ])
+  const { clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(100_000)
+
+  const ui = await mountPane($)
+  // 100 s over 4 steps is 25 s a step, and 6 steps are left.
+  expect((await ui.find({ type: 'Text', text: /left$/ }))?.text).toBe('1m 40s · about 2m 30s left')
+  await ui.unmount()
+})

@@ -126,13 +126,14 @@ has it set, otherwise `.claude/progress` under the folder the session started
 in.
 
 The pane lists each running job with a bar, its step and total, its label and
-the time since it started. A job with no step count shows a spinner instead of
-a bar. A running job whose file has not changed for 10 minutes is marked
-stalled, with how long it ran before its file went quiet, which is how a
-script that was killed before it could write its finished line shows. Under a Finished heading come the five newest jobs that
-ended during the session, with how long each took and, for a failure, its exit
-code. A file that does not hold a progress line shows as
-`unreadable progress line`.
+the time since it started. From its third step a job also shows about how long
+it has left, from its average time per step so far. A job with no step count
+shows a spinner instead of a bar. A running job whose file has not changed for
+10 minutes is marked stalled, with how long it ran before its file went quiet,
+which is how a script that was killed before it could write its finished line
+shows. Under a Finished heading come the five newest jobs that ended during the
+session, with how long each took and, for a failure, its exit code. A file
+that does not hold a progress line shows as `unreadable progress line`.
 
 The pane opens by itself the first time a job starts running in a session, if
 the terminal is at least 144 columns wide. It does not open by itself again in
