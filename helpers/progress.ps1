@@ -76,7 +76,7 @@ function Set-Progress {
     if ($Step -notmatch '^[0-9]+$' -or $Total -notmatch '^[0-9]+$') {
         throw "progress: expected non-negative integers for step and total, got '$Step' '$Total'"
     }
-    $text = $Label -replace '[\r\n]', ' '
+    $text = $Label -replace '[\r\n\t]', ' '
     if ($text.Length -gt 0) { $text = " $text" }
     Write-ProgressLine "$script:ProgressStarted $Step $Total$text"
 }

@@ -133,6 +133,11 @@ class PowerShellHelperTests(unittest.TestCase):
         line = self.read_line(self.only_progress_file())
         self.assertEqual(self.running_fields(line)[3], "a b c")
 
+    def test_tabs_in_label_become_spaces(self) -> None:
+        self.run_job('Set-Progress -Step 1 -Total 2 -Label "a`tb"')
+        line = self.read_line(self.only_progress_file())
+        self.assertEqual(self.running_fields(line)[3], "a b")
+
     def test_repeated_calls_keep_the_same_start_time(self) -> None:
         body = (
             '$file = Join-Path $env:CLAUDE_PROGRESS_DIR "job.ps1-$PID.txt"\n'

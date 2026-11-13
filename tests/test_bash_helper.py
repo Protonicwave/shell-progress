@@ -139,6 +139,11 @@ class BashHelperTests(unittest.TestCase):
         line = self.read_line(self.only_progress_file())
         self.assertEqual(self.running_fields(line)[3], "a b c")
 
+    def test_tabs_in_label_become_spaces(self) -> None:
+        self.run_job(r"progress 1 2 $'a\tb'", keep_running=True)
+        line = self.read_line(self.only_progress_file())
+        self.assertEqual(self.running_fields(line)[3], "a b")
+
     def test_repeated_calls_keep_the_same_start_time(self) -> None:
         body = (
             'file="$CLAUDE_PROGRESS_DIR/job.sh-$$.txt"\n'

@@ -82,6 +82,7 @@ progress() {
     local label="$*"
     label=${label//$'\r'/ }
     label=${label//$'\n'/ }
+    label=${label//$'\t'/ }
     _progress_write "$_progress_started $step $total${label:+ $label}"
 }
 

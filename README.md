@@ -17,7 +17,8 @@ Running:
 ```
 
 `total` is 0 when the script has no step count. The label may be empty, in
-which case there is no trailing space.
+which case there is no trailing space. It never holds a carriage return, line
+feed or tab, and the mod treats a line with one as unreadable.
 
 Finished:
 
@@ -45,7 +46,7 @@ progress 3 3
 ```
 
 `progress <step> <total> [label words...]` joins the label words with single
-spaces and replaces any carriage return or line feed with a space. Step and
+spaces and replaces any carriage return, line feed or tab with a space. Step and
 total must be non-negative decimal integers. Otherwise the call prints a
 message to stderr, writes nothing and returns 2.
 
