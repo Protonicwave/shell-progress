@@ -49,7 +49,7 @@ class PowerShellHelperTests(unittest.TestCase):
         ]
 
     def start(self, env: dict[str, str]) -> subprocess.Popen[str]:
-        return subprocess.Popen(  # noqa: S603
+        return subprocess.Popen(
             self.command(),
             env=env,
             cwd=self.root,
@@ -67,7 +67,7 @@ class PowerShellHelperTests(unittest.TestCase):
         cwd: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         self.write_script(body)
-        return subprocess.run(  # noqa: S603
+        return subprocess.run(
             self.command(),
             env=env or self.environment(),
             cwd=cwd or self.root,
@@ -271,7 +271,9 @@ class PowerShellHelperTests(unittest.TestCase):
             process.communicate(timeout=SUBPROCESS_TIMEOUT_SECONDS)
         names = sorted(path.name for path in self.progress_dir.glob("*.txt"))
         self.assertEqual(len(names), 2, names)
-        pids = {FILE_NAME.match(name).group(1) for name in names}  # type: ignore[union-attr]
+        matches = [FILE_NAME.match(name) for name in names]
+        self.assertTrue(all(matches), names)
+        pids = {match.group(1) for match in matches if match is not None}
         self.assertEqual(len(pids), 2)
 
     def test_without_progress_dir_variable_the_file_lands_under_the_working_directory(self) -> None:
