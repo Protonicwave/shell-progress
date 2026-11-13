@@ -9,7 +9,7 @@
 # trap must call `progress_done "$?"` to write the finished line.
 #
 # Every name defined here starts with _progress_ or PROGRESS_ so that it cannot
-# collide with the sourcing script. Safe under set -euo pipefail.
+# collide with the sourcing script. Safe under set -euo pipefail and failglob.
 
 PROGRESS_CLEANUP_MAX_FILES=500
 PROGRESS_FINISHED_MAX_AGE_SECONDS=86400
@@ -41,9 +41,17 @@ _progress_write() {
 # capped so a crowded directory cannot delay the start of a script; the
 # remainder waits for the next start.
 _progress_cleanup() {
-    local file started word code ended extra now count=0
+    local file started word code ended extra now count=0 glob_options files
     _progress_epoch now
-    for file in "$_progress_dir"/*.txt; do
+    # The caller's glob options could make an empty directory an error
+    # (failglob), so they are set here and put back.
+    glob_options=$(shopt -p nullglob failglob) || true
+    shopt -s nullglob
+    shopt -u failglob
+    files=("$_progress_dir"/*.txt)
+    eval "$glob_options"
+    # The guarded expansion keeps an empty array legal under set -u before Bash 4.4.
+    for file in ${files[@]+"${files[@]}"}; do
         [[ -f $file ]] || continue
         if (( count >= PROGRESS_CLEANUP_MAX_FILES )); then
             break

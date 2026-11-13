@@ -241,6 +241,19 @@ class BashHelperTests(unittest.TestCase):
         self.run_job("true", keep_running=True)
         self.assertEqual(len(list(self.progress_dir.glob("old-*.txt"))), extra)
 
+    def test_sourcing_under_failglob_with_no_progress_files_runs_the_script(self) -> None:
+        # The first source leaves the directory empty, so the second one's
+        # clean-up matches nothing.
+        result = self.run_job(
+            f'shopt -s failglob\nsource "{HELPER.as_posix()}"\nshopt -q failglob && echo kept\n'
+            "echo reached",
+            strict=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("kept", result.stdout)
+        self.assertIn("reached", result.stdout)
+        self.assertEqual(result.stderr, "")
+
     def test_two_concurrent_runs_write_two_files_with_different_pids(self) -> None:
         self.write_script("progress 1 2 x\nsleep 1")
         env = self.environment()
