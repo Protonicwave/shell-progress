@@ -88,6 +88,10 @@ progress() {
 
 progress_done() {
     local code=${1:-$?} now
+    if [[ ! $code =~ ^-?[0-9]+$ ]]; then
+        printf "progress_done: expected an integer exit code, got '%s'\n" "$code" >&2
+        return 2
+    fi
     _progress_epoch now
     _progress_write "$_progress_started done $code $now"
 }

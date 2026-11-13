@@ -62,6 +62,9 @@ one, and its trap must call `progress_done "$?"`:
 trap 'cleanup_temp_files; progress_done "$?"' EXIT
 ```
 
+`progress_done` takes a signed decimal integer. Given anything else it prints a
+message to stderr, writes nothing and returns 2.
+
 ## PowerShell
 
 ```powershell

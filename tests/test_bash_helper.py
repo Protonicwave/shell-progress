@@ -246,6 +246,19 @@ class BashHelperTests(unittest.TestCase):
         self.run_job("true", keep_running=True)
         self.assertEqual(len(list(self.progress_dir.glob("old-*.txt"))), extra)
 
+    def test_progress_done_rejects_a_non_integer_exit_code(self) -> None:
+        for code in ("abc", "1.5", "--1"):
+            with self.subTest(code=code):
+                shutil.rmtree(self.progress_dir, ignore_errors=True)
+                body = 'progress 1 2 x\nprogress_done "$CODE"\necho "status=$?"'
+                result = self.run_job(body, keep_running=True, env=self.environment(CODE=code))
+                self.assertIn("status=2", result.stdout)
+                self.assertIn(
+                    f"progress_done: expected an integer exit code, got '{code}'", result.stderr
+                )
+                line = self.read_line(self.only_progress_file())
+                self.assertEqual(self.running_fields(line)[1:3], (1, 2))
+
     def test_sourcing_under_failglob_with_no_progress_files_runs_the_script(self) -> None:
         # The first source leaves the directory empty, so the second one's
         # clean-up matches nothing.
