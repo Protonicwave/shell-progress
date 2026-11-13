@@ -178,11 +178,37 @@ export type UnfinishedJob = Job & { readonly line: RunningLine | null }
 export type FinishedJob = Job & { readonly line: FinishedLine }
 
 /**
+ * What a dismissal of `job` is kept under: its file and its start, so a later
+ * run that reuses the file name, as one given the same process id does, is a
+ * new job. `undefined` for an unreadable job, which has no start.
+ */
+export function dismissalKey(job: Job): string | undefined {
+  return job.line === null ? undefined : `${job.file}:${job.line.startedSec}`
+}
+
+/**
  * Splits jobs for the pane. Running and unreadable jobs are unfinished, in the
  * order given. Of the finished, only those that ended in or after the
  * session's first second show, newest first, at most MAX_SHOWN_FINISHED_JOBS.
+ * A job whose dismissal key is in `dismissed` is left out, and counted in
+ * `hiddenCount` if it would otherwise show.
  */
 export function shownJobs(
+  jobs: readonly Job[],
+  sessionStartedMs: number,
+  dismissed: ReadonlySet<string>,
+): {
+  unfinished: readonly UnfinishedJob[]
+  finished: readonly FinishedJob[]
+  hiddenCount: number
+} {
+  const isDismissed = (job: Job) => dismissed.has(dismissalKey(job) ?? '')
+  const shown = splitJobs(jobs.filter(job => !isDismissed(job)), sessionStartedMs)
+  const hidden = splitJobs(jobs.filter(isDismissed), sessionStartedMs)
+  return { ...shown, hiddenCount: hidden.unfinished.length + hidden.finished.length }
+}
+
+function splitJobs(
   jobs: readonly Job[],
   sessionStartedMs: number,
 ): { unfinished: readonly UnfinishedJob[]; finished: readonly FinishedJob[] } {

@@ -6,6 +6,7 @@ import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
 import {
   MS_PER_SECOND,
   barText,
+  dismissalKey,
   durationText,
   finishedText,
   isStalled,
@@ -30,22 +31,38 @@ const STALLED_COLOUR: Color = 'warning'
 const DONE_COLOUR: Color = 'success'
 const FAILED_COLOUR: Color = 'error'
 
-/** The two elements the pane draws with, which every surface's table holds. */
-type PaneElements = Pick<Elements['terminal'], 'Box' | 'Text'>
+/** The elements the pane draws with, which every surface's table holds. */
+type PaneElements = Pick<Elements['terminal'], 'Box' | 'Button' | 'Text'>
+
+/** What the pane's buttons do. Each settles once the change is stored. */
+type JobActions = {
+  /** Expands the job's row, or collapses it if it is the expanded one. */
+  readonly toggleJob: (file: string) => Promise<void>
+  readonly dismissJob: (key: string) => Promise<void>
+  readonly showHiddenJobs: () => Promise<void>
+}
 
 /** What the pane draws at one moment. */
 type PaneView = {
   readonly jobs: readonly Job[]
+  readonly progressDir: string
+  readonly expandedJob: string | null
+  readonly dismissedJobs: ReadonlySet<string>
   readonly bodyColumns: number
   readonly nowMs: number
   readonly sessionStartedMs: number
   readonly stallMs: number
+  readonly actions: JobActions
 }
 
 /** Draws the jobs as `docs/mockup.html` shows them: unfinished first, then the finished group. */
 export function drawPane(ui: PaneElements, view: PaneView) {
   const { Box, Text } = ui
-  const { unfinished, finished } = shownJobs(view.jobs, view.sessionStartedMs)
+  const { unfinished, finished, hiddenCount } = shownJobs(
+    view.jobs,
+    view.sessionStartedMs,
+    view.dismissedJobs,
+  )
   const runningCount = unfinished.filter(
     job => job.line !== null && !isStalled(job, view.nowMs, view.stallMs),
   ).length
@@ -53,13 +70,15 @@ export function drawPane(ui: PaneElements, view: PaneView) {
 
   return (
     <Box flexDirection="column">
-      {spreadRow(ui, <Text bold>{PANE_TITLE}</Text>, count === undefined ? undefined : <Text dimColor>{count}</Text>)}
-      {unfinished.length === 0 && finished.length === 0 && (
+      {spreadRow(ui, <Text bold>{PANE_TITLE}</Text>, headerRight(ui, view, count, hiddenCount))}
+      {unfinished.length === 0 && finished.length === 0 && hiddenCount === 0 && (
         <Text dimColor>No jobs yet. A script that sources the helpers shows here.</Text>
       )}
       {unfinished.map(job => (
         <Box key={job.file} flexDirection="column" marginTop={1}>
           {unfinishedRows(ui, view, job)}
+          {job.file === view.expandedJob &&
+            jobDetails(ui, view, job, isStalled(job, view.nowMs, view.stallMs))}
         </Box>
       ))}
       {finished.length > 0 && (
@@ -68,7 +87,10 @@ export function drawPane(ui: PaneElements, view: PaneView) {
         </Box>
       )}
       {finished.map(job => (
-        <Box key={job.file}>{finishedRow(ui, job)}</Box>
+        <Box key={job.file} flexDirection="column">
+          {finishedRow(ui, view, job)}
+          {job.file === view.expandedJob && jobDetails(ui, view, job, true)}
+        </Box>
       ))}
     </Box>
   )
@@ -83,11 +105,35 @@ function countText(
   return unfinishedCount === 0 && finishedCount > 0 ? 'all finished' : undefined
 }
 
+/** The header's right side: the count, then a button that shows the hidden jobs again. */
+function headerRight(
+  { Box, Button, Text }: PaneElements,
+  view: PaneView,
+  count: string | undefined,
+  hiddenCount: number,
+): RenderNode | undefined {
+  const countNode = count === undefined ? undefined : <Text dimColor>{count}</Text>
+  if (hiddenCount === 0) return countNode
+  return (
+    <Box gap={1}>
+      {countNode}
+      {countNode !== undefined && <Text dimColor>·</Text>}
+      <Button
+        key="show-hidden"
+        plain
+        dimColor
+        label={`${hiddenCount} hidden`}
+        onPress={view.actions.showHiddenJobs}
+      />
+    </Box>
+  )
+}
+
 function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): RenderNode[] {
   const { Text } = ui
-  const name = <Text bold>{job.script}</Text>
+  const name = nameButton(ui, view, job)
   if (job.line === null) {
-    return [spreadRow(ui, name, <Text color={FAILED_COLOUR}>unreadable progress line</Text>)]
+    return [nameRow(ui, name, <Text color={FAILED_COLOUR}>unreadable progress line</Text>)]
   }
 
   const line = job.line
@@ -107,13 +153,13 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
       ? <Text dimColor>·</Text>
       : <Text color={BAR_COLOUR}>{spinnerFrame(view.nowMs)}</Text>
     return [
-      spreadRow(ui, name, <Text dimColor>no step count</Text>),
+      nameRow(ui, name, <Text dimColor>no step count</Text>),
       spreadRow(ui, <Text>{glyph} {line.label}</Text>, time),
     ]
   }
 
   return [
-    spreadRow(ui, name, <Text>{stepText(line)}</Text>),
+    nameRow(ui, name, <Text>{stepText(line)}</Text>),
     barRow(ui, line, barCellsFor(view.bodyColumns), hasStalled),
     spreadRow(ui, <Text dimColor>{line.label}</Text>, time),
   ]
@@ -141,13 +187,70 @@ function barRow({ Text }: PaneElements, line: RunningLine, cells: number, isStal
   )
 }
 
-function finishedRow(ui: PaneElements, job: FinishedJob) {
+function finishedRow(ui: PaneElements, view: PaneView, job: FinishedJob) {
   const { Text } = ui
   const colour = job.line.exitCode === 0 ? DONE_COLOUR : FAILED_COLOUR
-  return spreadRow(
+  return nameRow(
     ui,
-    <Text dimColor>{job.script}</Text>,
+    nameButton(ui, view, job),
     <Text color={colour}>{finishedText(job.line)}</Text>,
+  )
+}
+
+/** The job's name, which expands or collapses its row when pressed. */
+function nameButton({ Button }: PaneElements, view: PaneView, job: Job) {
+  return (
+    <Button
+      key={job.file}
+      plain
+      dimColor={job.line?.kind === 'finished'}
+      label={job.script}
+      onPress={() => view.actions.toggleJob(job.file)}
+    />
+  )
+}
+
+/**
+ * The lines under an expanded row: the file, the process, and a Dismiss
+ * button when `canDismiss` and the job has a start to be dismissed by.
+ */
+function jobDetails(ui: PaneElements, view: PaneView, job: Job, canDismiss: boolean) {
+  const { Box, Button, Text } = ui
+  const facts = [`pid ${job.pid}`]
+  if (job.line !== null) facts.push(`started ${clockTimeText(job.line.startedSec)}`)
+  if (job.line?.kind === 'finished') facts.push(`exit ${job.line.exitCode}`)
+  const key = canDismiss ? dismissalKey(job) : undefined
+  return (
+    <Box flexDirection="column" marginLeft={2}>
+      <Text dimColor wrap="truncate-start">{`${view.progressDir}/${job.file}`}</Text>
+      <Text dimColor>{facts.join(' · ')}</Text>
+      {key !== undefined && (
+        <Button
+          key={`dismiss:${job.file}`}
+          label={`Dismiss ${job.script}`}
+          onPress={() => view.actions.dismissJob(key)}
+        />
+      )}
+    </Box>
+  )
+}
+
+/** The local time of day, `14:02:31`. */
+function clockTimeText(epochSec: number): string {
+  // ECMA-262 fixes toTimeString's form as `HH:mm:ss GMT+hhmm (zone)`.
+  return new Date(epochSec * MS_PER_SECOND).toTimeString().slice(0, 8)
+}
+
+/**
+ * A job's first row: its name button and `right`, which keeps its full width.
+ * A Button cannot be cut with an ellipsis, so a name wider than the pane wraps.
+ */
+function nameRow({ Box }: PaneElements, name: RenderNode, right: RenderNode) {
+  return (
+    <Box justifyContent="space-between" gap={2}>
+      {name}
+      <Box flexShrink={0}>{right}</Box>
+    </Box>
   )
 }
 

@@ -116,7 +116,8 @@ A script killed before it could write its finished line, by `kill -9`, Task
 Manager or `Stop-Process`, or a PowerShell script with no `finally` block,
 leaves a running file that nothing removes. The mod shows it as stalled, in
 the pane and on the status line, in every session until the file is deleted
-from the progress directory by hand.
+from the progress directory by hand. Dismissing it in the pane takes it out of
+the pane in every session, but not off the status line.
 
 ## The mod
 
@@ -134,6 +135,14 @@ which is how a script that was killed before it could write its finished line
 shows. Under a Finished heading come the five newest jobs that ended during the
 session, with how long each took and, for a failure, its exit code. A file
 that does not hold a progress line shows as `unreadable progress line`.
+
+Pressing a job's name expands its row to the path of its progress file, its
+process id, the time it started and, once finished, its exit code. Pressing it
+again, or another job's name, collapses it. An expanded stalled or finished
+job has a Dismiss button, which hides the job from the pane in this session and
+later ones. The pane's header then counts the hidden jobs, and pressing the
+count shows them all again. A later run that writes to the same file name is a
+new job and shows.
 
 The pane opens by itself the first time a job starts running in a session, if
 the terminal is at least 144 columns wide. It does not open by itself again in

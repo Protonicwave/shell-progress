@@ -81,10 +81,9 @@ test('the finished group lists the newest job first', async ($, on) => {
   await clock.advance(POLL_MS)
 
   const ui = await mountPane($)
-  // Each name is a dim Text inside the row's cutting Text; the outer ones give the order.
-  const names = (await ui.findAll({ type: 'Text', text: /^(first|second)\.sh$/ }))
-    .filter(found => found.props['wrap'] === 'truncate-end')
-    .map(found => found.text)
+  const names = (await ui.findAll({ type: 'Button', text: /^(first|second)\.sh$/ })).map(
+    found => found.text,
+  )
   expect(names).toEqual(['second.sh', 'first.sh'])
   expect((await ui.find({ type: 'Text', text: 'all finished' }))?.text).toBe('all finished')
   await ui.unmount()
@@ -209,10 +208,25 @@ test('a new file that cannot be read shows as unreadable', async ($, on) => {
   await clock.advance(POLL_MS)
 
   const ui = await mountPane($)
-  expect((await ui.find({ type: 'Text', text: 'secret.sh' }))?.text).toBe('secret.sh')
+  expect((await ui.find({ type: 'Button', text: 'secret.sh' }))?.text).toBe('secret.sh')
   expect((await ui.find({ type: 'Text', text: 'unreadable progress line' }))?.text).toBe(
     'unreadable progress line',
   )
+  await ui.unmount()
+})
+
+test('an unreadable job expands to its file and pid alone, and cannot be dismissed', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['odd.sh-7.txt', { text: 'not a progress line\n', mtimeMs: START_MS }],
+  ])
+  const { clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  await ui.press({ key: 'odd.sh-7.txt' })
+  expect((await ui.find({ type: 'Text', text: /^pid/ }))?.text).toBe('pid 7')
+  expect(await ui.find({ type: 'Button', text: /^Dismiss/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -227,5 +241,151 @@ test('a running job says about how long it has left from its third step', async 
   const ui = await mountPane($)
   // 100 s over 4 steps is 25 s a step, and 6 steps are left.
   expect((await ui.find({ type: 'Text', text: /left$/ }))?.text).toBe('1m 40s · about 2m 30s left')
+  await ui.unmount()
+})
+
+const localClockTime = (epochSec: number) => {
+  const date = new Date(epochSec * 1000)
+  return [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map(part => String(part).padStart(2, '0'))
+    .join(':')
+}
+
+test('pressing a job row shows its file, pid and start, and pressing it again hides them', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['build.sh-48213.txt', { text: runningLine(1, 2), mtimeMs: START_MS }],
+  ])
+  const { clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  const path = { type: 'Text', text: /build\.sh-48213\.txt$/ } as const
+  expect(await ui.find(path)).toBeUndefined()
+
+  await ui.press({ key: 'build.sh-48213.txt' })
+  expect((await ui.find(path))?.text).toBe('/work/progress/build.sh-48213.txt')
+  expect((await ui.find({ type: 'Text', text: /^pid/ }))?.text).toBe(
+    `pid 48213 · started ${localClockTime(STARTED_SEC)}`,
+  )
+  // A job still running cannot be dismissed.
+  expect(await ui.find({ type: 'Button', text: /^Dismiss/ })).toBeUndefined()
+
+  await ui.press({ key: 'build.sh-48213.txt' })
+  expect(await ui.find(path)).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a finished job shows its exit code when expanded', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['migrate.sh-5.txt', { text: finishedLine(1, 64), mtimeMs: START_MS }],
+  ])
+  const { clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  await ui.press({ key: 'migrate.sh-5.txt' })
+  expect((await ui.find({ type: 'Text', text: /^pid/ }))?.text).toBe(
+    `pid 5 · started ${localClockTime(STARTED_SEC)} · exit 1`,
+  )
+  await ui.unmount()
+})
+
+test('expanding one row collapses the other', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['build.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS }],
+    ['lint.sh-2.txt', { text: finishedLine(0, 22), mtimeMs: START_MS }],
+  ])
+  const { clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  await ui.press({ key: 'build.sh-1.txt' })
+  await ui.press({ key: 'lint.sh-2.txt' })
+  const paths = (await ui.findAll({ type: 'Text', text: /^\/work\/progress\// })).map(found => found.text)
+  expect(paths).toEqual(['/work/progress/lint.sh-2.txt'])
+  await ui.unmount()
+})
+
+test('dismissed stalled and finished jobs are stored, counted as hidden and shown again', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['build.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS - 120_000 }],
+    ['lint.sh-2.txt', { text: finishedLine(0, 22), mtimeMs: START_MS }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  for (const file of ['build.sh-1.txt', 'lint.sh-2.txt']) {
+    await ui.press({ key: file })
+    await ui.press({ key: `dismiss:${file}` })
+  }
+  expect(await ui.find({ type: 'Button', text: /\.sh$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /No jobs yet/ })).toBeUndefined()
+  expect(world.store.get('dismissedJobs')).toEqual([
+    `build.sh-1.txt:${STARTED_SEC}`,
+    `lint.sh-2.txt:${STARTED_SEC}`,
+  ])
+
+  expect((await ui.find({ type: 'Button', text: /hidden$/ }))?.text).toBe('2 hidden')
+  await ui.press({ key: 'show-hidden' })
+  const names = (await ui.findAll({ type: 'Button', text: /\.sh$/ })).map(found => found.text)
+  expect(names).toEqual(['build.sh', 'lint.sh'])
+  expect(world.store.get('dismissedJobs')).toEqual([])
+  await ui.unmount()
+})
+
+test('a job dismissed in an earlier session stays hidden', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['lint.sh-2.txt', { text: finishedLine(0, 22), mtimeMs: START_MS }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  world.store.set('dismissedJobs', [`lint.sh-2.txt:${STARTED_SEC}`])
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Button', text: 'lint.sh' })).toBeUndefined()
+  expect((await ui.find({ type: 'Button', text: /hidden$/ }))?.text).toBe('1 hidden')
+  await ui.unmount()
+})
+
+test('a stored dismissal list that is not a list of strings is logged and ignored', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['lint.sh-2.txt', { text: finishedLine(0, 22), mtimeMs: START_MS }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  world.store.set('dismissedJobs', { 'lint.sh-2.txt': true })
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  expect((await ui.find({ type: 'Button', text: 'lint.sh' }))?.text).toBe('lint.sh')
+  expect(world.logs).toEqual([
+    'shell-progress: ignoring dismissedJobs in the store: expected a list of strings',
+  ])
+  await ui.unmount()
+})
+
+test('the store keeps the newest 200 dismissals', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['lint.sh-2.txt', { text: finishedLine(0, 22), mtimeMs: START_MS }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  const earlier = Array.from({ length: 200 }, (_, index) => `old.sh-${index}.txt:1`)
+  world.store.set('dismissedJobs', earlier)
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  await ui.press({ key: 'lint.sh-2.txt' })
+  await ui.press({ key: 'dismiss:lint.sh-2.txt' })
+  expect(world.store.get('dismissedJobs')).toEqual([
+    ...earlier.slice(1),
+    `lint.sh-2.txt:${STARTED_SEC}`,
+  ])
   await ui.unmount()
 })

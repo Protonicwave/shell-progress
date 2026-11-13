@@ -16,7 +16,7 @@ export type FakeFile = { text: string; mtimeMs: number; isUnreadable?: boolean }
 
 /**
  * A progress directory beneath the mod, counting what the mod asks of it,
- * and a record of the status line and of the panes it opens.
+ * a record of the status line and of the panes it opens, and the mod's store.
  */
 export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
   const world = {
@@ -29,6 +29,8 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     openResult: { isPlaced: true } as UiOpenResult,
     /** Set to make every later listing never settle, as on a hung network share. */
     isListingHung: false,
+    /** The mod's `$.store`, which a test may fill before the session starts. */
+    store: new Map<string, unknown>(),
   }
   const clock = mock.clock(on, { now: START_MS })
   mock.env(on, { CLAUDE_PROGRESS_DIR: DIR })
@@ -65,6 +67,11 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
   on('ui.open', (_, e) => {
     world.opens.push(e.id)
     return { value: world.openResult }
+  })
+  on('store.get', (_, e) => ({ value: world.store.get(e.key) }))
+  on('store.set', (_, e) => {
+    world.store.set(e.key, e.value)
+    return { value: undefined }
   })
   on('ui.log', (_, e) => {
     world.logs.push(e.text)

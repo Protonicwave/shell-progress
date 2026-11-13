@@ -22,6 +22,8 @@ export type Job = {
   /** The file's name, `<script>-<pid>.txt`, which identifies the job. */
   readonly file: string
   readonly script: string
+  /** The process id in the file's name, as written: digits only. */
+  readonly pid: string
   /** The file's modification time when its line was read. */
   readonly mtimeMs: number
   /** `null` when the file does not hold a valid progress line. */
@@ -30,6 +32,13 @@ export type Job = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'shell-progress': { jobs: Shaped<readonly Job[]>; hasOpenedPane: boolean }
+    'shell-progress': {
+      jobs: Shaped<readonly Job[]>
+      hasOpenedPane: boolean
+      /** The file of the job whose row is expanded, or `null` when none is. */
+      expandedJob: string | null
+      /** The dismissal keys of the jobs the person dismissed, oldest first. */
+      dismissedJobs: readonly string[]
+    }
   }
 }

@@ -10,15 +10,23 @@ const COMMAND_NAME = 'progress'
 // A poll still running after this long is logged, once, as stuck.
 const STUCK_POLL_MS = 30_000
 const MS_PER_MINUTE = 60_000
+const DISMISSED_STORE_KEY = 'dismissedJobs'
+// A dismissal key names one run, so an old key never hides a new job; past
+// this many, the oldest are dropped, which only brings their jobs back.
+const MAX_DISMISSED_JOBS = 200
 
 // Change the tag when Job's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const jobs = atom({ plugin: 'shell-progress', key: 'jobs' } as const, [], {
-  shape: 'jobs-1',
+  shape: 'jobs-2',
 })
 // Set once the pane has opened by itself, so a person who closes it is not
 // shown it again in the same session.
 const hasOpenedPane = atom({ plugin: 'shell-progress', key: 'hasOpenedPane' } as const, false)
+const expandedJob = atom({ plugin: 'shell-progress', key: 'expandedJob' } as const, null)
+// Loaded from the plugin's store at session start and written back on each
+// change, so a dismissed job stays hidden in later sessions.
+const dismissedJobs = atom({ plugin: 'shell-progress', key: 'dismissedJobs' } as const, [])
 
 export const register: Register = (on, options) => {
   const stallMs = stallMinutesOf(options) * MS_PER_MINUTE
@@ -28,6 +36,7 @@ export const register: Register = (on, options) => {
       name: COMMAND_NAME,
       description: 'Show the background jobs pane',
     })
+    await loadDismissedJobs($)
     startPolling($, await progressDir($), stallMs)
     return next(e)
   })
@@ -42,19 +51,62 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
-    const [jobList, nowMs, usage] = await Promise.all([
+    const [jobList, dir, expanded, dismissed, nowMs, usage] = await Promise.all([
       read($, jobs),
+      progressDir($),
+      read($, expandedJob),
+      read($, dismissedJobs),
       $.clock.now(),
       $.session.usage(),
     ])
     return drawPane($.ui.resolve(e), {
       jobs: jobList,
+      progressDir: dir,
+      expandedJob: expanded,
+      dismissedJobs: new Set(dismissed),
       bodyColumns: e.props.bodyColumns,
       nowMs,
       sessionStartedMs: usage.startedAt,
       stallMs,
+      actions: jobActions($),
     })
   })
+}
+
+function jobActions($: EngineInterface) {
+  return {
+    toggleJob: async (file: string) => {
+      await update($, expandedJob, current => (current === file ? null : file))
+    },
+    dismissJob: async (key: string) => {
+      await update($, expandedJob, () => null)
+      await changeDismissedJobs($, keys => [...keys.filter(one => one !== key), key])
+    },
+    showHiddenJobs: () => changeDismissedJobs($, () => []),
+  }
+}
+
+async function loadDismissedJobs($: EngineInterface): Promise<void> {
+  const stored = await $.store.get(DISMISSED_STORE_KEY)
+  const isValid = stored === undefined || isStringList(stored)
+  if (!isValid) {
+    // Only this mod writes the key, so another value is a hand edit; the next
+    // dismissal replaces it.
+    $.ui.log(`shell-progress: ignoring ${DISMISSED_STORE_KEY} in the store: expected a list of strings`)
+  }
+  await update($, dismissedJobs, () => (isStringList(stored) ? stored : []))
+}
+
+function isStringList(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+}
+
+async function changeDismissedJobs(
+  $: EngineInterface,
+  change: (keys: readonly string[]) => readonly string[],
+): Promise<void> {
+  const keys = await update($, dismissedJobs, current => change(current).slice(-MAX_DISMISSED_JOBS))
+  await $.store.set(DISMISSED_STORE_KEY, keys)
 }
 
 function stallMinutesOf(options: PluginOptions): number {
