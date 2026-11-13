@@ -36,8 +36,10 @@ type PaneView = {
 export function drawPane(ui: PaneElements, view: PaneView) {
   const { Box, Text } = ui
   const { active, finished } = shownJobs(view.jobs, view.sessionStartedMs)
-  const runningCount = active.filter(job => job.line !== null).length
-  const count = countText(runningCount, finished.length)
+  const runningCount = active.filter(
+    job => job.line !== null && !isStalled(job, view.nowMs, view.stallMs),
+  ).length
+  const count = countText(runningCount, active.length, finished.length)
 
   return (
     <Box flexDirection="column">
@@ -62,9 +64,9 @@ export function drawPane(ui: PaneElements, view: PaneView) {
   )
 }
 
-function countText(runningCount: number, finishedCount: number): string {
+function countText(runningCount: number, activeCount: number, finishedCount: number): string {
   if (runningCount > 0) return `${runningCount} running`
-  return finishedCount > 0 ? 'all finished' : ''
+  return activeCount === 0 && finishedCount > 0 ? 'all finished' : ''
 }
 
 function activeRows(ui: PaneElements, view: PaneView, job: ActiveJob): RenderNode[] {

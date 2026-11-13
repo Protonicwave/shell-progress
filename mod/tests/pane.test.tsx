@@ -90,6 +90,22 @@ test('the finished group lists the newest job first', async ($, on) => {
   await ui.unmount()
 })
 
+test('the header counts neither a stalled nor an unreadable job as running', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['build.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS - 120_000 }],
+    ['odd.sh-2.txt', { text: 'not a progress line\n', mtimeMs: START_MS }],
+    ['lint.sh-3.txt', { text: finishedLine(0, 22), mtimeMs: START_MS }],
+  ])
+  const { clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: /running$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'all finished' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('a job that finished before the session started is not drawn', async ($, on) => {
   const files = new Map<string, FakeFile>([
     ['old.sh-1.txt', { text: `${STARTED_SEC - 100} done 0 ${STARTED_SEC - 1}\n`, mtimeMs: START_MS }],
