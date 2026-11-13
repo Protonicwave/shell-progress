@@ -1,6 +1,6 @@
 import { expect, mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On, SessionUsage, UiOpenResult } from 'claude-code'
+import type { On, SessionUsage, UiNotifyResult, UiOpenResult } from 'claude-code'
 
 const DIR = '/work/progress'
 // The engine hands paths on in the platform's form, a drive letter and
@@ -16,7 +16,8 @@ export type FakeFile = { text: string; mtimeMs: number; isUnreadable?: boolean }
 
 /**
  * A progress directory beneath the mod, counting what the mod asks of it,
- * a record of the status line and of the panes it opens, and the mod's store.
+ * a record of the status line, the panes it opens and what it announces, and
+ * the mod's store.
  */
 export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
   const world = {
@@ -31,6 +32,10 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     isListingHung: false,
     /** The mod's `$.store`, which a test may fill before the session starts. */
     store: new Map<string, unknown>(),
+    toasts: [] as string[],
+    notifications: [] as string[],
+    /** What each `$.ui.notify` answers, or the hook's reason to deny it; a test may change it. */
+    notifyResult: { isSent: true, channel: 'kitty' } as UiNotifyResult | { deny: string },
   }
   const clock = mock.clock(on, { now: START_MS })
   mock.env(on, { CLAUDE_PROGRESS_DIR: DIR })
@@ -72,6 +77,14 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
   on('store.set', (_, e) => {
     world.store.set(e.key, e.value)
     return { value: undefined }
+  })
+  on('ui.toast', (_, e) => {
+    world.toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('ui.notify', (_, e) => {
+    world.notifications.push(e.text)
+    return 'deny' in world.notifyResult ? world.notifyResult : { value: world.notifyResult }
   })
   on('ui.log', (_, e) => {
     world.logs.push(e.text)

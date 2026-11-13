@@ -150,6 +150,12 @@ that session once closed. `/progress` opens it at any width. While a job runs,
 the status line under the prompt also names up to two jobs with their
 percentages, such as `build 58% · sync running · 1 more`.
 
+When a job the mod saw running finishes, a toast names it and how it ended,
+such as `build.sh done in 0m 31s`, or counts the jobs when several finish
+together. A job that failed, or ran for at least 2 minutes, also raises a
+system notification through the channel Claude Code's notification settings
+name. A dismissed job raises neither.
+
 To run the mod for one session, start Claude Code from the repository root
 with:
 
@@ -180,6 +186,9 @@ from the mod's row in the config menu, or in `~/.claude/settings.json`:
   }
 }
 ```
+
+The `notifyMinutes` setting, 2 by default, is how long a successful job must
+run before it raises a notification. It is changed the same way.
 
 ## Tests
 

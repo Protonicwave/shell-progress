@@ -2,14 +2,23 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
 import type { Job } from '../types'
+import type { FinishedJob } from './progress'
 import { PANE_ID, PANE_TITLE, drawPane } from './pane'
 import { POLL_INTERVAL_MS, pollJobs } from './poll'
-import { dismissalKey, isStalled, statusSummary } from './progress'
+import {
+  announcementText,
+  dismissalKey,
+  finishedSince,
+  isStalled,
+  isWorthNotifying,
+  statusSummary,
+} from './progress'
 
 const COMMAND_NAME = 'progress'
 // A poll still running after this long is logged, once, as stuck.
 const STUCK_POLL_MS = 30_000
 const MS_PER_MINUTE = 60_000
+const SECONDS_PER_MINUTE = 60
 const DISMISSED_STORE_KEY = 'dismissedJobs'
 // A dismissal key names one run, so an old key never hides a new job; past
 // this many, the oldest are dropped, which only brings their jobs back.
@@ -29,7 +38,8 @@ const expandedJob = atom({ plugin: 'shell-progress', key: 'expandedJob' } as con
 const dismissedJobs = atom({ plugin: 'shell-progress', key: 'dismissedJobs' } as const, [])
 
 export const register: Register = (on, options) => {
-  const stallMs = stallMinutesOf(options) * MS_PER_MINUTE
+  const stallMs = positiveMinutesOf(options, 'stallMinutes') * MS_PER_MINUTE
+  const notifySeconds = positiveMinutesOf(options, 'notifyMinutes') * SECONDS_PER_MINUTE
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -37,7 +47,7 @@ export const register: Register = (on, options) => {
       description: 'Show the background jobs pane',
     })
     await loadDismissedJobs($)
-    startPolling($, await progressDir($), stallMs)
+    startPolling($, await progressDir($), stallMs, notifySeconds)
     return next(e)
   })
 
@@ -109,10 +119,10 @@ async function changeDismissedJobs(
   await $.store.set(DISMISSED_STORE_KEY, keys)
 }
 
-function stallMinutesOf(options: PluginOptions): number {
-  const minutes = options['stallMinutes']
+function positiveMinutesOf(options: PluginOptions, name: 'stallMinutes' | 'notifyMinutes'): number {
+  const minutes = options[name]
   if (typeof minutes !== 'number' || !(minutes > 0)) {
-    throw new Error(`expected stallMinutes to be a positive number, got ${String(minutes)}`)
+    throw new Error(`expected ${name} to be a positive number, got ${String(minutes)}`)
   }
   return minutes
 }
@@ -124,7 +134,12 @@ async function progressDir($: EngineInterface): Promise<string> {
   return `${await $.session.root()}/.claude/progress`
 }
 
-function startPolling($: EngineInterface, dir: string, stallMs: number): void {
+function startPolling(
+  $: EngineInterface,
+  dir: string,
+  stallMs: number,
+  notifySeconds: number,
+): void {
   let isPolling = false
   let skippedTicks = 0
   // `null` until the first poll, so a reload always replaces whatever the
@@ -147,7 +162,7 @@ function startPolling($: EngineInterface, dir: string, stallMs: number): void {
     isPolling = true
     skippedTicks = 0
     // Settled by its own handlers, and the flag keeps polls from overlapping.
-    void pollOnce($, dir, stallMs)
+    void pollOnce($, dir, stallMs, notifySeconds)
       .then(
         summary => {
           loggedError = undefined
@@ -156,7 +171,7 @@ function startPolling($: EngineInterface, dir: string, stallMs: number): void {
           $.ui.status(summary)
         },
         (error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error)
+          const message = errorMessage(error)
           if (message === loggedError) return
           loggedError = message
           $.ui.log(`shell-progress: cannot poll ${dir}: ${message}`)
@@ -172,6 +187,7 @@ async function pollOnce(
   $: EngineInterface,
   dir: string,
   stallMs: number,
+  notifySeconds: number,
 ): Promise<string | undefined> {
   const previous = await read($, jobs)
   const current = await pollJobs($, dir, previous)
@@ -182,6 +198,8 @@ async function pollOnce(
   const shown = current.filter(job => !dismissed.has(dismissalKey(job) ?? ''))
   const nowMs = await $.clock.now()
   const isAnyLive = shown.some(job => isLive(job, nowMs, stallMs))
+  const finished = finishedSince(previous, shown)
+  if (finished.length > 0) announceFinished($, finished, notifySeconds)
   if (isAnyLive && !(await read($, hasOpenedPane))) await openPaneOnce($)
 
   // A running job's elapsed time and spinner move on every poll even when no
@@ -189,6 +207,31 @@ async function pollOnce(
   // row does not move, so it alone does not keep the pane redrawing.
   if (isAnyLive) $.ui.invalidate('ui.render')
   return statusSummary(shown, nowMs, stallMs)
+}
+
+/** One toast for the jobs that finished, and one notification for those worth one. */
+function announceFinished(
+  $: EngineInterface,
+  finished: readonly FinishedJob[],
+  notifySeconds: number,
+): void {
+  $.ui.toast(announcementText(finished))
+  const notable = finished.filter(job => isWorthNotifying(job, notifySeconds))
+  if (notable.length === 0) return
+  // Not awaited, so a notification channel that hangs cannot hold up the
+  // poll; both outcomes are settled here, and neither is retried.
+  void $.ui.notify(announcementText(notable)).then(
+    result => {
+      if (!result.isSent) $.ui.log(`shell-progress: notification not sent: ${result.reason}`)
+    },
+    (error: unknown) => {
+      $.ui.log(`shell-progress: notification failed: ${errorMessage(error)}`)
+    },
+  )
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function isLive(job: Job, nowMs: number, stallMs: number): boolean {

@@ -173,6 +173,39 @@ export function finishedText(line: FinishedLine): string {
     : `failed after ${duration}, exit ${line.exitCode}`
 }
 
+/**
+ * The jobs in `current` that were running in `previous` and have finished,
+ * in `current`'s order. A job first seen finished is left out, so the jobs
+ * that ended before a session started are never announced in it.
+ */
+export function finishedSince(
+  previous: readonly Job[],
+  current: readonly Job[],
+): readonly FinishedJob[] {
+  const wasRunning = new Set(
+    previous.filter(job => job.line?.kind === 'running').map(job => job.file),
+  )
+  return current.filter(isFinished).filter(job => wasRunning.has(job.file))
+}
+
+/**
+ * One line for jobs that finished together: `build.sh done in 0m 31s` for one,
+ * `3 jobs finished, 1 failed` for several. Throws on an empty list.
+ */
+export function announcementText(jobs: readonly FinishedJob[]): string {
+  const [first] = jobs
+  if (first === undefined) throw new RangeError('expected at least one finished job')
+  if (jobs.length === 1) return `${first.script} ${finishedText(first.line)}`
+  const failedCount = jobs.filter(job => job.line.exitCode !== 0).length
+  const failed = failedCount > 0 ? `, ${failedCount} failed` : ''
+  return `${jobs.length} jobs finished${failed}`
+}
+
+/** Whether a finished job failed or ran for at least `notifySeconds`. */
+export function isWorthNotifying(job: FinishedJob, notifySeconds: number): boolean {
+  return job.line.exitCode !== 0 || job.line.endedSec - job.line.startedSec >= notifySeconds
+}
+
 /** A job still running, or one whose file does not hold a progress line. */
 export type UnfinishedJob = Job & { readonly line: RunningLine | null }
 export type FinishedJob = Job & { readonly line: FinishedLine }

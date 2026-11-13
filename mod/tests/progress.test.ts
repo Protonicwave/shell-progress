@@ -2,18 +2,21 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { Job, ProgressLine } from '../types'
 import {
+  announcementText,
   barText,
   dismissalKey,
   durationText,
+  finishedSince,
   finishedText,
   isStalled,
+  isWorthNotifying,
   parseProgressLine,
   remainingSeconds,
   remainingText,
   shownJobs,
   statusSummary,
 } from '../hooks/progress'
-import type { RunningLine } from '../hooks/progress'
+import type { FinishedJob, RunningLine } from '../hooks/progress'
 
 const STALL_MS = 10 * 60_000
 const NOW_MS = 1_700_000_100_000
@@ -285,6 +288,65 @@ describe('dismissalKey', () => {
 
   test('gives none for an unreadable job', () => {
     expect(dismissalKey(job('odd.sh', null))).toBeUndefined()
+  })
+})
+
+describe('finishedSince', () => {
+  const done = (exitCode = 0): ProgressLine => ({
+    kind: 'finished',
+    startedSec: 1_700_000_000,
+    exitCode,
+    endedSec: 1_700_000_031,
+  })
+
+  test('gives the jobs that went from running to finished', () => {
+    const previous = [job('build.sh', running(1, 2)), job('lint.sh', running(3, 4))]
+    const current = [job('build.sh', done()), job('lint.sh', running(4, 4))]
+    expect(finishedSince(previous, current)).toEqual([job('build.sh', done())])
+  })
+
+  test('leaves out a job first seen finished, one already finished and one that was unreadable', () => {
+    const previous = [job('lint.sh', done()), job('odd.sh', null)]
+    const current = [job('build.sh', done(1)), job('lint.sh', done()), job('odd.sh', done())]
+    expect(finishedSince(previous, current)).toEqual([])
+  })
+})
+
+describe('announcementText', () => {
+  const finishedJob = (script: string, exitCode: number): FinishedJob => ({
+    ...job(script, null),
+    line: { kind: 'finished', startedSec: 1_700_000_000, exitCode, endedSec: 1_700_000_031 },
+  })
+
+  test('names a single job and how it ended', () => {
+    expect(announcementText([finishedJob('build.sh', 0)])).toBe('build.sh done in 0m 31s')
+    expect(announcementText([finishedJob('migrate.sh', 1)])).toBe(
+      'migrate.sh failed after 0m 31s, exit 1',
+    )
+  })
+
+  test('counts several jobs and their failures', () => {
+    const jobs = [finishedJob('a.sh', 0), finishedJob('b.sh', 2), finishedJob('c.sh', 0)]
+    expect(announcementText(jobs)).toBe('3 jobs finished, 1 failed')
+    expect(announcementText([finishedJob('a.sh', 0), finishedJob('c.sh', 0)])).toBe(
+      '2 jobs finished',
+    )
+  })
+})
+
+describe('isWorthNotifying', () => {
+  const finishedJob = (exitCode: number, seconds: number): FinishedJob => ({
+    ...job('build.sh', null),
+    line: { kind: 'finished', startedSec: 1_700_000_000, exitCode, endedSec: 1_700_000_000 + seconds },
+  })
+
+  test('holds for a failure of any length', () => {
+    expect(isWorthNotifying(finishedJob(1, 1), 120)).toBe(true)
+  })
+
+  test('holds for a success only from the given number of seconds', () => {
+    expect(isWorthNotifying(finishedJob(0, 119), 120)).toBe(false)
+    expect(isWorthNotifying(finishedJob(0, 120), 120)).toBe(true)
   })
 })
 
