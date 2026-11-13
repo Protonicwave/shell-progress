@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Background jobs pane</title>
+<meta name="description" content="Mockup of a Claude Code mod that draws live progress bars for background scripts beside the chat.">
+<style>
+:root {
+  /* Page chrome: neutral tinted toward the terminal's cool blue-grey */
+  --page: oklch(0.965 0.004 250);
+  --page-ink: oklch(0.24 0.012 250);
+  --page-muted: oklch(0.47 0.012 250);
+  --page-line: oklch(0.87 0.006 250);
+  --control: oklch(0.995 0.002 250);
+  --control-on: oklch(0.27 0.014 250);
+  --control-on-ink: oklch(0.97 0.004 250);
+  --focus: oklch(0.62 0.15 65);
+
+  /* Terminal: dark in both schemes, because it is a terminal */
+  --term: oklch(0.175 0.012 250);
+  --term-raised: oklch(0.215 0.012 250);
+  --term-line: oklch(0.32 0.012 250);
+  --term-ink: oklch(0.9 0.006 250);
+  --term-dim: oklch(0.64 0.01 250);
+  --term-faint: oklch(0.47 0.01 250);
+  --accent: oklch(0.8 0.14 72);          /* running bars: warm amber */
+  --done: oklch(0.78 0.13 150);
+  --failed: oklch(0.7 0.17 25);
+  --you: oklch(0.82 0.05 250);
+
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --term-size: 13px;
+
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
+  --r-window: 10px;
+  --r-control: 6px;
+  --shadow: 0 1px 2px oklch(0.2 0.02 250 / 0.12), 0 12px 32px -8px oklch(0.2 0.02 250 / 0.28);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: oklch(0.225 0.01 250);
+    --page-ink: oklch(0.93 0.005 250);
+    --page-muted: oklch(0.7 0.01 250);
+    --page-line: oklch(0.34 0.01 250);
+    --control: oklch(0.27 0.01 250);
+    --control-on: oklch(0.88 0.006 250);
+    --control-on-ink: oklch(0.2 0.01 250);
+    --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 12px 32px -8px oklch(0 0 0 / 0.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: oklch(0.225 0.01 250);
+  --page-ink: oklch(0.93 0.005 250);
+  --page-muted: oklch(0.7 0.01 250);
+  --page-line: oklch(0.34 0.01 250);
+  --control: oklch(0.27 0.01 250);
+  --control-on: oklch(0.88 0.006 250);
+  --control-on-ink: oklch(0.2 0.01 250);
+  --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 12px 32px -8px oklch(0 0 0 / 0.5);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--page-ink);
+  font: 16px/1.5 var(--sans);
+}
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.wrap { max-width: 1200px; margin: 0 auto; padding: var(--s6) var(--s4) var(--s7); }
+
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: var(--s4) var(--s6); margin-bottom: var(--s5); }
+h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height: 1.1; letter-spacing: -0.02em; font-weight: 650; text-wrap: balance; }
+.lede { margin: var(--s2) 0 0; color: var(--page-muted); max-width: 58ch; text-wrap: pretty; }
+
+.controls { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--page-line); border-radius: var(--r-control); background: var(--control); padding: 2px; }
+.seg button, .btn {
+  font: 500 14px/1 var(--sans);
+  color: var(--page-ink);
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--r-control) - 2px);
+  padding: 0 var(--s3);
+  min-height: 36px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.seg button[aria-pressed="true"] { background: var(--control-on); color: var(--control-on-ink); }
+.btn { border: 1px solid var(--page-line); background: var(--control); border-radius: var(--r-control); }
+.seg button:hover:not([aria-pressed="true"]), .btn:hover { background: color-mix(in oklch, var(--control) 80%, var(--page-ink) 8%); }
+.btn:active, .seg button:active { transform: translateY(1px); }
+@media (pointer: coarse) { .seg button, .btn { min-height: 44px; } }
+
+/* Terminal window */
+.term {
+  background: var(--term);
+  color: var(--term-ink);
+  border-radius: var(--r-window);
+  box-shadow: var(--shadow);
+  border: 1px solid oklch(0.3 0.012 250);
+  overflow: hidden;
+  font: var(--term-size)/1.5 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.titlebar { display: flex; align-items: center; gap: var(--s3); height: 36px; padding: 0 var(--s3); background: var(--term-raised); border-bottom: 1px solid var(--term-line); font: 12px/1 var(--sans); color: var(--term-dim); }
+.tab { background: var(--term); color: var(--term-ink); padding: 7px var(--s3); border-radius: 6px 6px 0 0; align-self: end; }
+.cols { margin-left: auto; font-family: var(--mono); color: var(--term-faint); }
+
+.screen { display: grid; grid-template-columns: minmax(0, 1fr) 42ch; min-height: 440px; }
+.term[data-cols="100"] .screen { grid-template-columns: minmax(0, 1fr); }
+.term[data-cols="100"] .pane { display: none; }
+
+.transcript { padding: var(--s4) var(--s4) var(--s3); min-width: 0; }
+.line { margin: 0 0 var(--s2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.line.you { color: var(--you); }
+.line .mark { color: var(--term-ink); }
+.line .tool { font-weight: 700; }
+.sub { color: var(--term-dim); }
+.line.note { color: var(--term-dim); }
+.line.note .ok { color: var(--done); }
+.line.note .bad { color: var(--failed); }
+.line.enter { animation: fade-tint 1.6s var(--ease); }
+
+.pane { border-left: 1px solid var(--term-line); padding: var(--s4) var(--s4) var(--s3); min-width: 0; }
+.pane-head { display: flex; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s3); }
+.pane-title { font-weight: 700; }
+.pane-count { color: var(--term-dim); }
+.group { color: var(--term-dim); margin: var(--s4) 0 var(--s2); }
+.job { margin-bottom: var(--s3); }
+.row { display: flex; justify-content: space-between; gap: var(--s2); min-width: 0; }
+.row > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.row > :last-child { flex: none; }
+.name { font-weight: 700; }
+.step { color: var(--term-dim); }
+.bar { display: block; white-space: pre; letter-spacing: 0; line-height: 1.35; }
+.bar .fill { color: var(--accent); }
+.bar .empty { color: var(--term-faint); }
+.spin { color: var(--accent); }
+.job.finished .row { color: var(--term-dim); }
+.job.finished .ok { color: var(--done); }
+.job.finished .bad { color: var(--failed); }
+.job.enter { animation: fade-tint 1.6s var(--ease); }
+@keyframes fade-tint { from { background: oklch(0.8 0.14 72 / 0.14); } to { background: transparent; } }
+
+.prompt { margin: 0 var(--s4); border: 1px solid var(--term-line); border-radius: 6px; padding: var(--s2) var(--s3); color: var(--term-dim); }
+.prompt .caret { color: var(--term-ink); }
+.cursor { display: inline-block; width: 0.6em; background: var(--term-ink); color: transparent; }
+.status { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s5); padding: var(--s2) var(--s4) var(--s3); color: var(--term-dim); }
+.status .jobs { color: var(--term-ink); display: inline-flex; flex-wrap: wrap; gap: 0 var(--s4); }
+.status .jobs b { color: var(--accent); font-weight: 400; }
+.status .hint { color: var(--term-faint); }
+
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--s5) var(--s6); margin-top: var(--s6); color: var(--page-muted); font-size: 15px; }
+.notes h2 { margin: 0 0 var(--s1); font-size: 15px; color: var(--page-ink); font-weight: 600; }
+.notes p { margin: 0; text-wrap: pretty; }
+.notes code { font: 13.5px var(--mono); color: var(--page-ink); }
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 760px) {
+  :root { --term-size: 12px; }
+  .wrap { padding-top: var(--s5); }
+  .screen { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .pane { border-left: 0; border-top: 1px solid var(--term-line); }
+  .cols { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .line.enter, .job.enter { animation: none; }
+  .btn:active, .seg button:active { transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Background jobs pane</h1>
+      <p class="lede">A Claude Code mod reads the progress line each script writes and draws a bar per job beside the chat. Narrow the terminal and the summary moves to the status line.</p>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Terminal width">
+        <button type="button" data-cols="160" aria-pressed="true">160 columns</button>
+        <button type="button" data-cols="100" aria-pressed="false">100 columns</button>
+      </div>
+      <button type="button" class="btn" id="pause" aria-pressed="false">Pause live updates</button>
+      <button type="button" class="btn" id="restart">Restart jobs</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="term" id="term" data-cols="160">
+      <div class="titlebar" aria-hidden="true">
+        <span class="tab">claude: shell-progress</span>
+        <span class="cols" id="cols">160 × 34</span>
+      </div>
+
+      <div class="screen">
+        <section class="transcript" aria-label="Chat transcript" id="transcript">
+          <p class="line you">&gt; run the build and the test suite in the background, and sync the fixtures while you're at it</p>
+          <p class="line"><span class="mark">●</span> Starting all three in the background. Each script writes its step to .claude/progress/, so the pane tracks them while I read the migration notes.</p>
+          <p class="line"><span class="mark">●</span> <span class="tool">Bash</span>(./scripts/build.sh)<br><span class="sub">  ⎿  Running in the background</span></p>
+          <p class="line"><span class="mark">●</span> <span class="tool">Bash</span>(pwsh -File scripts/test-suite.ps1)<br><span class="sub">  ⎿  Running in the background</span></p>
+          <p class="line"><span class="mark">●</span> <span class="tool">Bash</span>(./scripts/sync-fixtures.sh)<br><span class="sub">  ⎿  Running in the background</span></p>
+          <p class="line"><span class="mark">●</span> <span class="tool">Read</span>(docs/migrations.md)<br><span class="sub">  ⎿  Read 84 lines</span></p>
+        </section>
+
+        <aside class="pane" aria-label="Background jobs pane">
+          <div class="pane-head">
+            <span class="pane-title">Background jobs</span>
+            <span class="pane-count" id="count"></span>
+          </div>
+          <div id="running"></div>
+          <div class="group" id="finished-label">Finished</div>
+          <div id="finished"></div>
+        </aside>
+      </div>
+
+      <div class="prompt" aria-hidden="true"><span class="caret">&gt;</span> <span class="cursor">_</span></div>
+      <div class="status" id="status" aria-label="Status line"></div>
+    </div>
+    <p class="sr" aria-live="polite" id="announce"></p>
+
+    <div class="notes">
+      <div>
+        <h2>Where the numbers come from</h2>
+        <p>Each script overwrites one line in <code>.claude/progress/&lt;name&gt;-&lt;pid&gt;.txt</code>, such as <code>7 12 compiling assets</code>. Its exit trap writes <code>done 0</code>, or <code>done</code> with the exit code.</p>
+      </div>
+      <div>
+        <h2>No step count</h2>
+        <p>A script that writes <code>0 0</code> gets a spinner and elapsed time instead of a bar, like sync-fixtures.sh here.</p>
+      </div>
+      <div>
+        <h2>Narrow windows</h2>
+        <p>Below the pane's width the terminal does not draw it, so the same mod writes the summary to the status line. <code>/progress</code> opens the pane at any width.</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const BAR = 24;
+  const EIGHTHS = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
+  const SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+
+  const BUILD = ["cleaning out/", "resolving packages", "generating types", "compiling core", "compiling cli", "compiling server",
+    "compiling assets", "bundling client", "minifying", "hashing files", "writing manifest", "copying to dist/"];
+  const TESTS = ["tests/unit", "tests/api", "tests/db", "tests/integration"];
+
+  // Sample records for the mockup. Elapsed times are in seconds at the moment the page opens.
+  const seed = () => ({
+    running: [
+      { id: "build", name: "build.sh", step: 7, total: 12, elapsed: 72, every: 2.4, labels: BUILD, exit: 0 },
+      { id: "tests", name: "test-suite.ps1", step: 12, total: 48, elapsed: 48, every: 0.9, labels: TESTS, exit: 0 },
+      { id: "sync", name: "sync-fixtures.sh", step: 0, total: 0, elapsed: 31, every: 3.2, endsAt: 52,
+        files: ["users.json", "orders.json", "products.json", "invoices.json", "audit-log.json", "regions.json", "rates.json"], exit: 0 },
+    ],
+    finished: [
+      { id: "migrate", name: "migrate.sh", text: "failed at 3/7, exit 1", bad: true },
+      { id: "lint", name: "lint.sh", text: "done in 0m 22s", bad: false },
+    ],
+  });
+
+  let state = seed();
+  let paused = false;
+  let frame = 0;
+  let lastTick = performance.now();
+  let due = {};
+  const resetDue = () => { due = {}; state.running.forEach(j => { due[j.id] = j.every; }); };
+  resetDue();
+
+  const $ = id => document.getElementById(id);
+  const fmt = s => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
+  const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+
+  function bar(fraction) {
+    const eighths = Math.round(fraction * BAR * 8);
+    const full = Math.floor(eighths / 8);
+    const part = EIGHTHS[eighths % 8];
+    const used = full + (part ? 1 : 0);
+    return `<span class="fill">${"█".repeat(full)}${part}</span><span class="empty">${"░".repeat(BAR - used)}</span>`;
+  }
+
+  function label(job) {
+    if (job.total === 0) return `downloading ${job.files[Math.min(job.files.length - 1, Math.floor(job.elapsed / 3.2) % job.files.length)]}`;
+    if (job.id === "tests") return `running ${job.labels[Math.min(3, Math.floor(job.step / 12))]}`;
+    return job.labels[Math.min(job.labels.length - 1, job.step - 1)];
+  }
+
+  function jobHTML(job) {
+    if (job.total === 0) {
+      const glyph = reduce.matches ? "…" : SPIN[frame % SPIN.length];
+      return `<div class="job" data-id="${job.id}">
+        <div class="row"><span class="name">${esc(job.name)}</span><span class="step">no step count</span></div>
+        <div class="row"><span><span class="spin">${glyph}</span> ${esc(label(job))}</span><span class="step">${fmt(job.elapsed)}</span></div>
+      </div>`;
+    }
+    const pct = Math.round((job.step / job.total) * 100);
+    return `<div class="job" data-id="${job.id}">
+      <div class="row"><span class="name">${esc(job.name)}</span><span>${job.step}/${job.total}  ${String(pct).padStart(3, " ")}%</span></div>
+      <span class="bar" role="progressbar" aria-label="${esc(job.name)}" aria-valuemin="0" aria-valuemax="${job.total}" aria-valuenow="${job.step}">${bar(job.step / job.total)}</span>
+      <div class="row"><span class="step">${esc(label(job))}</span><span class="step">${fmt(job.elapsed)}</span></div>
+    </div>`;
+  }
+
+  function finishedHTML(job, fresh) {
+    return `<div class="job finished${fresh ? " enter" : ""}" data-id="${job.id}">
+      <div class="row"><span>${esc(job.name)}</span><span class="${job.bad ? "bad" : "ok"}">${esc(job.text)}</span></div>
+    </div>`;
+  }
+
+  function statusHTML() {
+    const narrow = $("term").dataset.cols === "100";
+    const n = state.running.length;
+    const parts = state.running.map(j => {
+      const short = j.name.replace(/\.(sh|ps1)$/, "").replace("test-suite", "tests").replace("sync-fixtures", "sync");
+      if (j.total === 0) return `<span>${short} <b>running</b></span>`;
+      return narrow && j.id === "tests" ? `<span>${short} <b>${j.step}/${j.total}</b></span>` : `<span>${short} <b>${Math.round(j.step / j.total * 100)}%</b></span>`;
+    });
+    const jobs = n === 0 ? "no background jobs" : narrow ? parts.join("") : `${n} job${n === 1 ? "" : "s"} running`;
+    const hint = narrow && n > 0 ? `<span class="hint">/progress opens the pane</span>` : "";
+    return `<span>Opus 5.5</span><span>shell-progress</span><span class="jobs">${jobs}</span>${hint}`;
+  }
+
+  let freshId = null;
+  function render() {
+    $("running").innerHTML = state.running.map(jobHTML).join("");
+    $("finished").innerHTML = state.finished.map(j => finishedHTML(j, j.id === freshId)).join("");
+    freshId = null;
+    const n = state.running.length;
+    $("count").textContent = n === 0 ? "all finished" : `${n} running`;
+    $("status").innerHTML = statusHTML();
+  }
+
+  function note(html) {
+    const p = document.createElement("p");
+    p.className = "line note enter";
+    p.innerHTML = html;
+    $("transcript").appendChild(p);
+  }
+
+  let restartIn = null;
+  function restart() {
+    state = seed();
+    resetDue();
+    restartIn = null;
+    document.querySelectorAll(".line.note").forEach(n => n.remove());
+    render();
+  }
+
+  function finish(job) {
+    state.running = state.running.filter(j => j !== job);
+    const ok = job.exit === 0;
+    const text = ok ? `done in ${fmt(job.elapsed)}` : `failed at ${job.step}/${job.total}, exit ${job.exit}`;
+    state.finished.unshift({ id: job.id, name: job.name, text, bad: !ok });
+    freshId = job.id;
+    note(`<span class="${ok ? "ok" : "bad"}">●</span> Background task ${esc(job.name)} finished: exit ${job.exit}`);
+    $("announce").textContent = `${job.name} ${text}`;
+    if (state.running.length === 0) restartIn = 8;
+  }
+
+  // One state change per tick, so each can be followed.
+  function tick() {
+    const now = performance.now();
+    const dt = Math.min(0.5, (now - lastTick) / 1000);
+    lastTick = now;
+    if (!paused) {
+      frame++;
+      if (restartIn !== null && (restartIn -= dt) <= 0) restart();
+      state.running.forEach(j => { j.elapsed += dt; due[j.id] -= dt; });
+      const ready = state.running.filter(j => due[j.id] <= 0).sort((a, b) => due[a.id] - due[b.id])[0];
+      if (ready) {
+        due[ready.id] = ready.every;
+        if (ready.total === 0) {
+          if (ready.elapsed >= ready.endsAt) finish(ready);
+        } else {
+          ready.step++;
+          if (ready.step >= ready.total) finish(ready);
+        }
+      }
+      render();
+    }
+  }
+
+  function setCols(cols) {
+    document.querySelectorAll(".seg button").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.cols === cols)));
+    $("term").dataset.cols = cols;
+    $("cols").textContent = `${cols} × 34`;
+    const url = new URL(location.href);
+    url.searchParams.set("cols", cols);
+    try { history.replaceState(null, "", url); } catch (e) { /* file: URLs may refuse */ }
+    render();
+  }
+  document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => setCols(b.dataset.cols)));
+
+  $("pause").addEventListener("click", e => {
+    paused = !paused;
+    e.currentTarget.setAttribute("aria-pressed", String(paused));
+    e.currentTarget.textContent = paused ? "Resume live updates" : "Pause live updates";
+  });
+
+  $("restart").addEventListener("click", () => {
+    restart();
+    $("announce").textContent = "Jobs restarted";
+  });
+
+  setCols(new URLSearchParams(location.search).get("cols") === "100" ? "100" : "160");
+  lastTick = performance.now();
+  setInterval(tick, 120);
+})();
+</script>
+</body>
+</html>
