@@ -110,3 +110,18 @@ python -m unittest discover -s tests -q
 The Bash tests need `bash` on `PATH` and the PowerShell tests need
 `powershell` (Windows PowerShell 5.1). A suite whose interpreter is missing is
 skipped.
+
+The mod's tests run against Claude Code's own test kit:
+
+```
+claude plugin test mod
+claude plugin validate mod
+```
+
+Type-checking needs the API declarations that Claude Code writes into
+`mod/.claude-plugin/types/` when an interactive session loads the mod, so
+start `claude --plugin-dir mod` once after cloning. Then:
+
+```
+npx -y -p typescript@5.8.3 tsc -p mod
+```
