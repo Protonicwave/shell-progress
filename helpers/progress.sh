@@ -97,7 +97,13 @@ progress_done() {
 }
 
 _progress_name=${0##*/}
-_progress_dir=${CLAUDE_PROGRESS_DIR:-$PWD/.claude/progress}
+_progress_dir=${CLAUDE_PROGRESS_DIR:-.claude/progress}
+# Fixed now, so a script that changes directory keeps writing to the same
+# place. Git Bash also takes a drive-letter path such as C:/work as absolute.
+case $_progress_dir in
+    /* | [A-Za-z]:[/\\]*) ;;
+    *) _progress_dir=$PWD/$_progress_dir ;;
+esac
 _progress_file="$_progress_dir/$_progress_name-$$.txt"
 _progress_epoch _progress_started
 

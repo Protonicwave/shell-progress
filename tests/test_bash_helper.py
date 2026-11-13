@@ -272,6 +272,13 @@ class BashHelperTests(unittest.TestCase):
         self.assertIn("reached", result.stdout)
         self.assertEqual(result.stderr, "")
 
+    def test_relative_progress_dir_is_fixed_when_the_helper_is_sourced(self) -> None:
+        work = self.root / "work"
+        (work / "elsewhere").mkdir(parents=True)
+        env = self.environment(CLAUDE_PROGRESS_DIR="rel")
+        self.run_job("cd elsewhere\nprogress 1 2 x", keep_running=True, env=env, cwd=work)
+        self.only_progress_file(work / "rel")
+
     def test_two_concurrent_runs_write_two_files_with_different_pids(self) -> None:
         self.write_script("progress 1 2 x\nsleep 1")
         env = self.environment()

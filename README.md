@@ -91,11 +91,16 @@ failed write produces a warning, not an error.
 
 The progress directory is `$CLAUDE_PROGRESS_DIR` when it is set and not
 empty. Otherwise it is `.claude/progress` under the working directory at the
-moment the helper is loaded. It is created if missing.
+moment the helper is loaded, and a relative `CLAUDE_PROGRESS_DIR` is taken from
+that directory too. The helper fixes the directory when it loads and creates it
+if missing, so a script that changes directory later keeps writing to the same
+place.
 
-A script that changes directory before loading the helper writes under that
-other directory, where the mod will not look. Set `CLAUDE_PROGRESS_DIR` in that
-case.
+The mod looks in one directory only. A script that runs from another folder,
+or changes directory before loading the helper, writes where the mod will not
+look. For those, set `CLAUDE_PROGRESS_DIR` to one absolute path in the
+environment Claude Code starts from and in the one the scripts run in, for
+example by exporting it from your shell profile.
 
 ## Clean-up
 

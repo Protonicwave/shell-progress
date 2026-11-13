@@ -289,6 +289,13 @@ class PowerShellHelperTests(unittest.TestCase):
         self.run_job("Set-Progress -Step 1 -Total 2 -Label x", env=env, cwd=work)
         self.only_progress_file(work / ".claude" / "progress")
 
+    def test_relative_progress_dir_is_fixed_when_the_helper_is_loaded(self) -> None:
+        work = self.root / "work"
+        (work / "elsewhere").mkdir(parents=True)
+        env = self.environment(CLAUDE_PROGRESS_DIR="rel")
+        self.run_job("Set-Location elsewhere\nSet-Progress -Step 1 -Total 2", env=env, cwd=work)
+        self.only_progress_file(work / "rel")
+
     def test_unwritable_progress_dir_warns_and_does_not_fail_the_script(self) -> None:
         blocker = self.root / "blocker"
         blocker.write_text("a file, not a directory", encoding="utf-8")
