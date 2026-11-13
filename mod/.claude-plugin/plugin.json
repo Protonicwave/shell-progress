@@ -1,0 +1,14 @@
+{
+  "name": "shell-progress",
+  "version": "0.1.0",
+  "description": "Shows the progress that scripts report through the shell-progress helpers.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "stallMinutes": {
+      "type": "number",
+      "title": "Minutes before a job shows as stalled",
+      "description": "A running job whose progress file has not changed for this many minutes shows as stalled.",
+      "default": 10
+    }
+  }
+}
