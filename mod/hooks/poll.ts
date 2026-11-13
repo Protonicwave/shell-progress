@@ -20,8 +20,10 @@ type ProgressFile = {
 
 /**
  * Lists `dir` once and returns its jobs, oldest start first, reading only
- * files whose modification time differs from `previous`, newest first and at
- * most MAX_READS_PER_POLL; the rest wait for a later poll. A file that cannot
+ * files whose modification time differs from `previous`, at most
+ * MAX_READS_PER_POLL. Files never read come first, then those whose last
+ * read is oldest, so a file left for a later poll moves up rather than wait
+ * behind files that change on every poll. A file that cannot
  * be read keeps its earlier job. Returns `previous` itself when nothing
  * changed. A missing directory has no jobs.
  */
@@ -34,6 +36,7 @@ export async function pollJobs(
   const known = new Map(previous.map(job => [job.file, job]))
   const changed = files
     .filter(file => file.size <= MAX_LINE_BYTES && known.get(file.name)?.mtimeMs !== file.mtimeMs)
+    .sort((a, b) => lastReadMtimeMs(known.get(a.name)) - lastReadMtimeMs(known.get(b.name)))
     .slice(0, MAX_READS_PER_POLL)
   const texts = await readTexts($, dir, changed)
 
@@ -44,6 +47,11 @@ export async function pollJobs(
   const isUnchanged =
     jobs.length === previous.length && jobs.every((job, index) => job === previous[index])
   return isUnchanged ? previous : jobs
+}
+
+/** The modification time a job was read at, or 0 for a file never read. */
+function lastReadMtimeMs(job: Job | undefined): number {
+  return job?.mtimeMs ?? 0
 }
 
 async function listOrEmpty($: EngineInterface, dir: string): Promise<readonly FsEntry[]> {

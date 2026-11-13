@@ -159,3 +159,23 @@ test('a stalled job left from earlier does not open the pane', { options: { stal
   expect(world.statuses).toEqual(['old stalled'])
   expect(world.opens).toEqual([])
 })
+
+test('a changed file is read on the next poll however many others keep changing', async ($, on) => {
+  const files = new Map<string, FakeFile>()
+  const touchBusyJobs = (mtimeMs: number) => {
+    for (let pid = 1; pid <= 20; pid += 1) {
+      files.set(`busy.sh-${pid}.txt`, { text: runningLine(1, 4), mtimeMs })
+    }
+  }
+  files.set('quiet.sh-99.txt', { text: runningLine(1, 2), mtimeMs: START_MS })
+  touchBusyJobs(START_MS + 1)
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS * 2)
+  expect(world.reads.filter(name => name === 'quiet.sh-99.txt')).toHaveLength(1)
+
+  files.set('quiet.sh-99.txt', { text: `${STARTED_SEC} done 0 ${STARTED_SEC + 1}\n`, mtimeMs: START_MS + 2 })
+  touchBusyJobs(START_MS + 10)
+  await clock.advance(POLL_MS)
+  expect(world.reads.filter(name => name === 'quiet.sh-99.txt')).toHaveLength(2)
+})
