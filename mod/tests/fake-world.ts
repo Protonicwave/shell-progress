@@ -27,13 +27,16 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     opens: [] as string[],
     /** What each `$.ui.open` answers; a test may change it. */
     openResult: { isPlaced: true } as UiOpenResult,
+    /** Set to make every later listing never settle, as on a hung network share. */
+    isListingHung: false,
   }
   const clock = mock.clock(on, { now: START_MS })
   mock.env(on, { CLAUDE_PROGRESS_DIR: DIR })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('fs.list', (_, e) => {
+  on('fs.list', async (_, e) => {
     expect(segments(e.path)).toEqual(segments(DIR))
     world.lists += 1
+    if (world.isListingHung) await new Promise<never>(() => {})
     if (files === undefined) throw new Error(`ENOENT: ${e.path}`)
     const entries = [...files].map(([name, file]) => ({
       name,

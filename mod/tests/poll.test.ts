@@ -215,3 +215,19 @@ test('the pane is redrawn on each poll while a job runs, and not for a stalled o
   await clock.advance(POLL_MS * 2)
   expect(redraws).toBe(2)
 })
+
+test('a poll that does not settle is logged once, and no second poll starts beside it', async ($, on) => {
+  const files = new Map<string, FakeFile>()
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+  world.isListingHung = true
+
+  await clock.advance(29_000)
+  expect(world.logs).toEqual([])
+  await clock.advance(POLL_MS * 4)
+  expect(world.logs).toEqual(['shell-progress: a poll of /work/progress has not finished after 30s'])
+  await clock.advance(60_000)
+  expect(world.logs).toHaveLength(1)
+  expect(world.lists).toBe(2)
+})

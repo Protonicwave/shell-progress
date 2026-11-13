@@ -7,6 +7,8 @@ import { POLL_INTERVAL_MS, pollJobs } from './poll'
 import { isStalled, statusSummary } from './progress'
 
 const COMMAND_NAME = 'progress'
+// A poll still running after this long is logged, once, as stuck.
+const STUCK_POLL_MS = 30_000
 const MS_PER_MINUTE = 60_000
 
 // Change the tag when Job's fields change: it declines what an earlier
@@ -72,6 +74,7 @@ async function progressDir($: EngineInterface): Promise<string> {
 
 function startPolling($: EngineInterface, dir: string, stallMs: number): void {
   let isPolling = false
+  let skippedTicks = 0
   // `null` until the first poll, so a reload always replaces whatever the
   // previous copy of the module left on the status line.
   let shownStatus: string | undefined | null = null
@@ -80,8 +83,17 @@ function startPolling($: EngineInterface, dir: string, stallMs: number): void {
   // The timer lives until the module reloads, which drops it with the
   // environment, so nothing needs to cancel it.
   $.clock.every(POLL_INTERVAL_MS, () => {
-    if (isPolling) return
+    if (isPolling) {
+      // fs calls take no timeout, so a hung read cannot be cancelled; the
+      // poll is left to settle, and the log says why the pane stopped moving.
+      skippedTicks += 1
+      if (skippedTicks === Math.ceil(STUCK_POLL_MS / POLL_INTERVAL_MS)) {
+        $.ui.log(`shell-progress: a poll of ${dir} has not finished after ${STUCK_POLL_MS / 1000}s`)
+      }
+      return
+    }
     isPolling = true
+    skippedTicks = 0
     // Settled by its own handlers, and the flag keeps polls from overlapping.
     void pollOnce($, dir, stallMs)
       .then(
