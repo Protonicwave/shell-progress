@@ -30,6 +30,6 @@ export type Job = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'shell-progress': { jobs: Shaped<readonly Job[]> }
+    'shell-progress': { jobs: Shaped<readonly Job[]>; hasOpenedPane: boolean }
   }
 }

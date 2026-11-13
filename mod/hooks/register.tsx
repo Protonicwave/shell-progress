@@ -1,8 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
+import type { Job } from '../types'
+import { PANE_ID, PANE_TITLE, drawPane } from './pane'
 import { pollJobs } from './poll'
-import { statusSummary } from './progress'
+import { jobStatus, statusSummary } from './progress'
 
 const POLL_INTERVAL_MS = 500
 const MS_PER_MINUTE = 60_000
@@ -12,6 +14,9 @@ const MS_PER_MINUTE = 60_000
 const jobs = atom({ plugin: 'shell-progress', key: 'jobs' } as const, [], {
   shape: 'jobs-1',
 })
+// Set once the pane has opened by itself, so a person who closes it is not
+// shown it again in the same session.
+const hasOpenedPane = atom({ plugin: 'shell-progress', key: 'hasOpenedPane' } as const, false)
 
 export const register: Register = (on, options) => {
   const stallMs = stallMinutesOf(options) * MS_PER_MINUTE
@@ -19,6 +24,21 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     startPolling($, await progressDir($), stallMs)
     return next(e)
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
+    const [jobList, nowMs, usage] = await Promise.all([
+      read($, jobs),
+      $.clock.now(),
+      $.session.usage(),
+    ])
+    return drawPane($.ui.resolve(e), {
+      jobs: jobList,
+      bodyColumns: e.props.bodyColumns,
+      nowMs,
+      sessionStartedMs: usage.startedAt,
+      stallMs,
+    })
   })
 }
 
@@ -79,5 +99,27 @@ async function pollOnce(
   const previous = await read($, jobs)
   const current = await pollJobs($, dir, previous)
   if (current !== previous) await update($, jobs, () => current)
-  return statusSummary(current, await $.clock.now(), stallMs)
+
+  const nowMs = await $.clock.now()
+  const isAnyLive = current.some(job => isLive(job, nowMs, stallMs))
+  if (isAnyLive && !(await read($, hasOpenedPane))) await openPaneOnce($)
+
+  const summary = statusSummary(current, nowMs, stallMs)
+  // A running job's elapsed time and spinner move on every poll even when no
+  // file changed, so the pane is drawn again while one runs.
+  if (summary !== undefined) $.ui.invalidate('ui.render')
+  return summary
+}
+
+function isLive(job: Job, nowMs: number, stallMs: number): boolean {
+  const status = jobStatus(job, nowMs, stallMs)
+  return status === 'running' || status === 'no-step-count'
+}
+
+async function openPaneOnce($: EngineInterface): Promise<void> {
+  // Marked first, so a slow open cannot let the next poll open it again.
+  await update($, hasOpenedPane, () => true)
+  // Too narrow a terminal leaves the pane unplaced, waiting for more width or
+  // for /progress, which is the behaviour wanted, so the answer is not used.
+  await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
 }

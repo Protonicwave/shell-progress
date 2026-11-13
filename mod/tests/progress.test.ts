@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { Job, ProgressLine } from '../types'
-import { jobStatus, parseProgressLine, statusSummary } from '../hooks/progress'
+import {
+  barText,
+  durationText,
+  finishedText,
+  jobStatus,
+  parseProgressLine,
+  shownJobs,
+  statusSummary,
+} from '../hooks/progress'
 
 const STALL_MS = 10 * 60_000
 const NOW_MS = 1_700_000_100_000
@@ -172,5 +180,97 @@ describe('statusSummary', () => {
   test('is undefined once every job has finished', () => {
     const jobs = [job('lint.sh', parseProgressLine('1700000000 done 0 1700000060'))]
     expect(statusSummary(jobs, NOW_MS, STALL_MS)).toBeUndefined()
+  })
+})
+
+describe('barText', () => {
+  const EIGHTHS = ['▏', '▎', '▍', '▌', '▋', '▊', '▉']
+
+  test('is all empty at 0', () => {
+    expect(barText(0, 10)).toEqual({ filled: '', empty: '░'.repeat(10) })
+  })
+
+  test('is all filled at 1', () => {
+    expect(barText(1, 10)).toEqual({ filled: '█'.repeat(10), empty: '' })
+  })
+
+  test('draws a partial cell after the full ones', () => {
+    expect(barText(0.55, 10)).toEqual({ filled: '█████▌', empty: '░'.repeat(4) })
+  })
+
+  test('draws every eighth of a cell', () => {
+    EIGHTHS.forEach((glyph, index) => {
+      const eighths = 3 * 8 + index + 1
+      expect(barText(eighths / 80, 10)).toEqual({ filled: `███${glyph}`, empty: '░'.repeat(6) })
+    })
+  })
+
+  test('rounds to the nearest eighth', () => {
+    expect(barText(0.999, 10)).toEqual({ filled: '█'.repeat(10), empty: '' })
+    expect(barText(0.001, 10)).toEqual({ filled: '', empty: '░'.repeat(10) })
+  })
+
+  test('refuses a fraction outside 0 to 1 or a width below one cell', () => {
+    expect(() => barText(1.5, 10)).toThrow('expected a fraction from 0 to 1, got 1.5')
+    expect(() => barText(0.5, 0)).toThrow('expected at least one cell, got 0')
+  })
+})
+
+describe('durationText', () => {
+  test('gives minutes and padded seconds below an hour', () => {
+    expect(durationText(0)).toBe('0m 00s')
+    expect(durationText(72)).toBe('1m 12s')
+    expect(durationText(3599)).toBe('59m 59s')
+  })
+
+  test('gives hours and padded minutes from an hour', () => {
+    expect(durationText(3600)).toBe('1h 00m')
+    expect(durationText(7_505)).toBe('2h 05m')
+  })
+
+  test('shows a start in the future as no time at all', () => {
+    expect(durationText(-30)).toBe('0m 00s')
+  })
+})
+
+describe('finishedText', () => {
+  test('gives the duration of a job that exited 0', () => {
+    expect(finishedText({ kind: 'finished', startedSec: 100, exitCode: 0, endedSec: 122 })).toBe(
+      'done in 0m 22s',
+    )
+  })
+
+  test('gives the duration and exit code of a job that failed', () => {
+    expect(finishedText({ kind: 'finished', startedSec: 100, exitCode: -1, endedSec: 164 })).toBe(
+      'failed after 1m 04s, exit -1',
+    )
+  })
+})
+
+describe('shownJobs', () => {
+  const SESSION_STARTED_MS = 1_700_000_000_500
+  const finished = (script: string, endedSec: number, exitCode = 0): Job =>
+    job(script, { kind: 'finished', startedSec: 1_699_999_000, exitCode, endedSec })
+
+  test('keeps running and unreadable jobs active, in the order given', () => {
+    const jobs = [job('build.sh', running(1, 2)), job('odd.sh', null), job('sync.sh', running(0, 0))]
+    expect(shownJobs(jobs, SESSION_STARTED_MS)).toEqual({ active: jobs, finished: [] })
+  })
+
+  test('hides jobs that finished before the session started', () => {
+    const before = finished('old.sh', 1_699_999_999)
+    const sameSecond = finished('edge.sh', 1_700_000_000)
+    expect(shownJobs([before, sameSecond], SESSION_STARTED_MS).finished).toEqual([sameSecond])
+  })
+
+  test('shows the five newest finished jobs, newest first', () => {
+    const jobs = [1, 2, 3, 4, 5, 6, 7].map(n => finished(`job${n}.sh`, 1_700_000_000 + n, n % 2))
+    expect(shownJobs(jobs, SESSION_STARTED_MS).finished.map(one => one.script)).toEqual([
+      'job7.sh',
+      'job6.sh',
+      'job5.sh',
+      'job4.sh',
+      'job3.sh',
+    ])
   })
 })

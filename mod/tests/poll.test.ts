@@ -1,67 +1,7 @@
-import { expect, mock, test } from 'claude-code/testing'
-import type { Engine } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import { expect, test } from 'claude-code/testing'
 
-const DIR = '/work/progress'
-// The engine hands paths on in the platform's form, a drive letter and
-// backslashes on Windows, so the fake compares them without the root.
-const segments = (path: string) =>
-  path.split(/[\\/]/).filter(part => part !== '' && !/^[A-Za-z]:$/.test(part))
-const fileNameOf = (path: string) => segments(path).at(-1) ?? ''
-const POLL_MS = 500
-const START_MS = 1_700_000_000_000
-const STARTED_SEC = START_MS / 1000
-
-type FakeFile = { text: string; mtimeMs: number; isUnreadable?: boolean }
-
-/**
- * A progress directory beneath the mod, counting what the mod asks of it,
- * and a record of the status line.
- */
-function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
-  const world = { lists: 0, reads: [] as string[], statuses: [] as (string | undefined)[], logs: [] as string[] }
-  const clock = mock.clock(on, { now: START_MS })
-  mock.env(on, { CLAUDE_PROGRESS_DIR: DIR })
-  on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('fs.list', (_, e) => {
-    expect(segments(e.path)).toEqual(segments(DIR))
-    world.lists += 1
-    if (files === undefined) throw new Error(`ENOENT: ${e.path}`)
-    const entries = [...files].map(([name, file]) => ({
-      name,
-      kind: 'file' as const,
-      size: file.text.length,
-      mtimeMs: file.mtimeMs,
-      isLink: false,
-    }))
-    return { value: entries }
-  })
-  on('fs.exists', () => ({ value: files !== undefined }))
-  on('fs.read', (_, e) => {
-    expect(segments(e.path).slice(0, -1)).toEqual(segments(DIR))
-    const name = fileNameOf(e.path)
-    world.reads.push(name)
-    const file = files?.get(name)
-    if (file === undefined || file.isUnreadable === true) throw new Error(`EBUSY: ${e.path}`)
-    return { value: file.text }
-  })
-  on('ui.status', (_, e) => {
-    world.statuses.push(e.text)
-    return { value: undefined }
-  })
-  on('ui.log', (_, e) => {
-    world.logs.push(e.text)
-    return { value: undefined }
-  })
-  return { world, clock }
-}
-
-async function startSession($: Engine): Promise<void> {
-  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
-}
-
-const runningLine = (step: number, total: number, label = '') =>
-  `${STARTED_SEC} ${step} ${total}${label === '' ? '' : ` ${label}`}\n`
+import type { FakeFile } from './fake-world'
+import { POLL_MS, START_MS, STARTED_SEC, fakeWorld, runningLine, startSession } from './fake-world'
 
 test('each poll lists once and reads only changed files, at most 20', async ($, on) => {
   const files = new Map<string, FakeFile>()
@@ -188,4 +128,34 @@ test('a job stalls once its file is unchanged for stallMinutes', { options: { st
 
   await clock.advance(POLL_MS)
   expect(world.statuses).toEqual(['build 50%', 'build stalled'])
+})
+
+test('the pane opens when the first running job appears, and only then', async ($, on) => {
+  const files = new Map<string, FakeFile>()
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+
+  await clock.advance(POLL_MS)
+  expect(world.opens).toEqual([])
+
+  files.set('build.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS })
+  await clock.advance(POLL_MS)
+  expect(world.opens).toEqual(['shell-progress'])
+
+  files.set('build.sh-10.txt', { text: `${STARTED_SEC} done 0 ${STARTED_SEC + 1}\n`, mtimeMs: START_MS + 1 })
+  files.set('test.sh-11.txt', { text: runningLine(1, 2), mtimeMs: START_MS + 1 })
+  await clock.advance(POLL_MS * 2)
+  expect(world.opens).toEqual(['shell-progress'])
+})
+
+test('a stalled job left from earlier does not open the pane', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['old.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS - 120_000 }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+
+  await clock.advance(POLL_MS)
+  expect(world.statuses).toEqual(['old stalled'])
+  expect(world.opens).toEqual([])
 })
