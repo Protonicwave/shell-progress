@@ -1,8 +1,9 @@
 # shell-progress
 
-Helpers that let a script report its progress to a Claude Code mod that draws
-a bar per job. The mod is not built yet. What exists is the helpers, one for
-Bash and one for Windows PowerShell 5.1, and the file format they write.
+Helpers that let a script report its progress, and a Claude Code mod that
+draws a bar per job in a pane beside the chat. There is one helper for Bash and
+one for Windows PowerShell 5.1; both write the file format below, and the mod
+reads it.
 
 ## Line format
 
@@ -98,6 +99,59 @@ Each time a helper is loaded it deletes finished files in the progress
 directory whose end time is more than 24 hours old. Running files, files it
 cannot parse and recent finished files are left alone. It examines at most 500
 files per start, and any beyond that wait for the next one.
+
+## The mod
+
+The mod in `mod/` polls the progress directory twice a second. It reads the
+same directory the helpers write to: `$CLAUDE_PROGRESS_DIR` when the session
+has it set, otherwise `.claude/progress` under the folder the session started
+in.
+
+The pane lists each running job with a bar, its step and total, its label and
+the time since it started. A job with no step count shows a spinner instead of
+a bar. A running job whose file has not changed for 10 minutes is marked
+stalled, which is how a script that was killed before it could write its
+finished line shows. Under a Finished heading come the five newest jobs that
+ended during the session, with how long each took and, for a failure, its exit
+code. A file that does not hold a progress line shows as
+`unreadable progress line`.
+
+The pane opens by itself the first time a job starts running in a session, if
+the terminal is at least 144 columns wide. It does not open by itself again in
+that session once closed. `/progress` opens it at any width. While a job runs,
+the status line under the prompt also names up to two jobs with their
+percentages, such as `build 58% · sync running · 1 more`.
+
+To run the mod for one session, start Claude Code from the repository root
+with:
+
+```
+claude --plugin-dir mod
+```
+
+To load it in every session, add the absolute path of the `mod` folder to
+`CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`.
+Separate several folders with the platform's path-list separator (`;` on
+Windows, `:` elsewhere):
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_PLUGIN_DIRS": "C:/Users/you/shell-progress/mod"
+  }
+}
+```
+
+The stall threshold is the `stallMinutes` setting, 10 by default. Change it
+from the mod's row in the config menu, or in `~/.claude/settings.json`:
+
+```json
+{
+  "pluginConfigs": {
+    "shell-progress": { "options": { "stallMinutes": 30 } }
+  }
+}
+```
 
 ## Tests
 
