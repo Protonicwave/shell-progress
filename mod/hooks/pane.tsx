@@ -7,8 +7,9 @@ import { barText, durationText, finishedText, isStalled, shownJobs } from './pro
 export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'Background jobs'
 
-const MIN_BAR_CELLS = 10
 const MAX_BAR_CELLS = 40
+// Columns kept clear to the right of the bar.
+const BAR_GAP_COLUMNS = 2
 const MS_PER_SECOND = 1000
 const SPINNER_FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 // The pane is redrawn on each poll while a job runs, so the spinner turns
@@ -141,7 +142,7 @@ function spreadRow({ Box, Text }: PaneElements, left: RenderNode, right: RenderN
 }
 
 function barCellsFor(bodyColumns: number): number {
-  return Math.min(MAX_BAR_CELLS, Math.max(MIN_BAR_CELLS, bodyColumns - 2))
+  return Math.max(1, Math.min(MAX_BAR_CELLS, bodyColumns - BAR_GAP_COLUMNS))
 }
 
 function spinnerFrame(nowMs: number): string {

@@ -152,6 +152,21 @@ test('the elapsed time moves on while a job runs', async ($, on) => {
   await ui.unmount()
 })
 
+test('the bar fits a narrow pane', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['build.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS }],
+  ])
+  const { clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 8 }, surface: 'terminal' })
+  // Half of 6 cells: 3 full, 3 empty.
+  expect((await ui.find({ type: 'Text', text: /^░+$/ }))?.text).toBe('░░░')
+  expect((await ui.find({ type: 'Text', text: /^█+$/ }))?.text).toBe('███')
+  await ui.unmount()
+})
+
 test('a long label is cut at the edge of the pane', async ($, on) => {
   const label = 'compiling '.repeat(10).trim()
   const files = new Map<string, FakeFile>([
