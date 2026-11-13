@@ -10,6 +10,7 @@
 #
 # Every name defined here starts with _progress_ or PROGRESS_ so that it cannot
 # collide with the sourcing script. Safe under set -euo pipefail and failglob.
+# Needs Bash 4.2 or later, for printf's %(...)T.
 
 PROGRESS_CLEANUP_MAX_FILES=500
 PROGRESS_FINISHED_MAX_AGE_SECONDS=86400

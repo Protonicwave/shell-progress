@@ -37,6 +37,9 @@ temporary name and renamed into place, so a reader never sees half a line.
 
 ## Bash
 
+The helper needs Bash 4.2 or later, for `printf '%(%s)T'`. The `/bin/bash`
+that ships with macOS is 3.2; use one from a package manager there.
+
 ```bash
 source helpers/progress.sh
 
@@ -109,6 +112,12 @@ directory whose end time is more than 24 hours old. Running files, files it
 cannot parse and recent finished files are left alone. It examines at most 500
 files per start, and any beyond that wait for the next one.
 
+A script killed before it could write its finished line, by `kill -9`, Task
+Manager or `Stop-Process`, or a PowerShell script with no `finally` block,
+leaves a running file that nothing removes. The mod shows it as stalled, in
+the pane and on the status line, in every session until the file is deleted
+from the progress directory by hand.
+
 ## The mod
 
 The mod in `mod/` polls the progress directory twice a second. It reads the
@@ -119,8 +128,8 @@ in.
 The pane lists each running job with a bar, its step and total, its label and
 the time since it started. A job with no step count shows a spinner instead of
 a bar. A running job whose file has not changed for 10 minutes is marked
-stalled, which is how a script that was killed before it could write its
-finished line shows. Under a Finished heading come the five newest jobs that
+stalled, with how long it ran before its file went quiet, which is how a
+script that was killed before it could write its finished line shows. Under a Finished heading come the five newest jobs that
 ended during the session, with how long each took and, for a failure, its exit
 code. A file that does not hold a progress line shows as
 `unreadable progress line`.
