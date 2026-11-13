@@ -199,3 +199,19 @@ test('/progress says why the pane is not shown where nothing can draw it', async
   const result = await runProgressCommand($)
   expect(result.text).toBe('Background jobs pane opened but not shown: no-surface: none is attached')
 })
+
+test('a new file that cannot be read shows as unreadable', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['secret.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS, isUnreadable: true }],
+  ])
+  const { clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  expect((await ui.find({ type: 'Text', text: 'secret.sh' }))?.text).toBe('secret.sh')
+  expect((await ui.find({ type: 'Text', text: 'unreadable progress line' }))?.text).toBe(
+    'unreadable progress line',
+  )
+  await ui.unmount()
+})

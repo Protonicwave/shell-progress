@@ -10,6 +10,7 @@ const MAX_TRACKED_FILES = 200
 // marked unreadable without being read.
 const MAX_LINE_BYTES = 4096
 const PROGRESS_FILE_NAME = /^(.+)-\d+\.txt$/
+const READ_FAILED = Symbol('read failed')
 
 type ProgressFile = {
   readonly name: string
@@ -23,9 +24,8 @@ type ProgressFile = {
  * files whose modification time differs from `previous`, at most
  * MAX_READS_PER_POLL. Files never read come first, then those whose last
  * read is oldest, so a file left for a later poll moves up rather than wait
- * behind files that change on every poll. A file that cannot
- * be read keeps its earlier job. Returns `previous` itself when nothing
- * changed. A missing directory has no jobs.
+ * behind files that change on every poll. Returns `previous` itself when
+ * nothing changed. A missing directory has no jobs.
  */
 export async function pollJobs(
   $: EngineInterface,
@@ -38,10 +38,10 @@ export async function pollJobs(
     .filter(file => file.size <= MAX_LINE_BYTES && known.get(file.name)?.mtimeMs !== file.mtimeMs)
     .sort((a, b) => lastReadMtimeMs(known.get(a.name)) - lastReadMtimeMs(known.get(b.name)))
     .slice(0, MAX_READS_PER_POLL)
-  const texts = await readTexts($, dir, changed)
+  const reads = await readFiles($, dir, changed)
 
   const jobs = files
-    .map(file => jobOf(file, known.get(file.name), texts.get(file.name)))
+    .map(file => jobOf(file, known.get(file.name), reads.get(file.name)))
     .filter(job => job !== undefined)
     .sort(byStart)
   const isUnchanged =
@@ -75,32 +75,45 @@ function progressFiles(entries: readonly FsEntry[]): readonly ProgressFile[] {
   return files.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, MAX_TRACKED_FILES)
 }
 
-async function readTexts(
+async function readFiles(
   $: EngineInterface,
   dir: string,
   files: readonly ProgressFile[],
-): Promise<ReadonlyMap<string, string>> {
+): Promise<ReadonlyMap<string, string | typeof READ_FAILED>> {
   const reads = await Promise.all(
     files.map(async file => {
       try {
         return [file.name, await $.fs.read(`${dir}/${file.name}`)] as const
       } catch {
-        // Every cause is transient or ends with the file gone: a helper
-        // renaming over it (which Windows can refuse a reader), or a clean-up
-        // deleting it. The caller keeps the earlier job and the next poll
-        // reads again, so the cause does not change what happens.
-        return undefined
+        // The engine's errors carry no type to tell causes apart, and `jobOf`
+        // treats them all alike: a known job is read again next poll, which
+        // covers a helper renaming over the file, and a new file shows as
+        // unreadable until it changes, which covers a file never readable.
+        return [file.name, READ_FAILED] as const
       }
     }),
   )
-  return new Map(reads.filter(read => read !== undefined))
+  return new Map<string, string | typeof READ_FAILED>(reads)
 }
 
-function jobOf(file: ProgressFile, known: Job | undefined, text: string | undefined): Job | undefined {
-  if (text !== undefined) return jobFrom(file, parseProgressLine(text))
+/**
+ * The job to show for `file`, given what this poll read from it, if anything.
+ * A file left for a later poll keeps its earlier job, or has none yet.
+ */
+function jobOf(
+  file: ProgressFile,
+  known: Job | undefined,
+  read: string | typeof READ_FAILED | undefined,
+): Job | undefined {
+  if (typeof read === 'string') return jobFrom(file, parseProgressLine(read))
   if (known?.mtimeMs === file.mtimeMs) return known
   if (file.size > MAX_LINE_BYTES) return jobFrom(file, null)
-  return known
+  // Changed since its last read, and that read failed or waits for a later
+  // poll: what was shown stays until a read succeeds.
+  if (known !== undefined) return known
+  // Recorded at this modification time, so it is read again only once it changes.
+  if (read === READ_FAILED) return jobFrom(file, null)
+  return undefined
 }
 
 function jobFrom(file: ProgressFile, line: Job['line']): Job {

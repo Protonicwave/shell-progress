@@ -179,3 +179,19 @@ test('a changed file is read on the next poll however many others keep changing'
   await clock.advance(POLL_MS)
   expect(world.reads.filter(name => name === 'quiet.sh-99.txt')).toHaveLength(2)
 })
+
+test('a new file that cannot be read is read again only once it changes', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['secret.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS, isUnreadable: true }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+
+  await clock.advance(POLL_MS * 3)
+  expect(world.reads).toEqual(['secret.sh-1.txt'])
+
+  files.set('secret.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS + 1 })
+  await clock.advance(POLL_MS)
+  expect(world.reads).toEqual(['secret.sh-1.txt', 'secret.sh-1.txt'])
+  expect(world.statuses).toEqual([undefined, 'secret 50%'])
+})
