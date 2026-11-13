@@ -181,7 +181,9 @@ python -m unittest discover -s tests -q
 
 The Bash tests need `bash` on `PATH` and the PowerShell tests need
 `powershell` (Windows PowerShell 5.1). A suite whose interpreter is missing is
-skipped.
+skipped. On Windows, run them from Git Bash: in PowerShell or cmd, `bash` is
+usually the WSL launcher, which cannot use the Windows temporary paths the
+tests pass it, and most Bash tests fail.
 
 The mod's tests run against Claude Code's own test kit:
 
