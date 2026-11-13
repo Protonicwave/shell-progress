@@ -58,8 +58,9 @@ function Remove-ExpiredProgressFiles {
                 ($now - [long]$parts[3]) -gt $script:ProgressFinishedMaxAgeSeconds) {
                 [IO.File]::Delete($path)
             }
-        } catch {
-            # A reader or another script holds the file; the next start retries.
+        } catch [IO.IOException], [UnauthorizedAccessException] {
+            # A reader or another script holds the file, or deleted it first, or
+            # it is not this user's to read; the next start retries.
             continue
         }
     }
