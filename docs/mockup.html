@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Background jobs pane</title>
-<meta name="description" content="Mockup of seven proposed features for a Claude Code mod that draws live progress bars for background scripts beside the chat.">
+<title>Session and jobs pane</title>
+<meta name="description" content="Mockup of a proposed session pane and seven job features for a Claude Code mod that draws live progress bars for background scripts beside the chat.">
 <style>
 :root {
   /* Page chrome: neutral tinted toward the terminal's cool blue-grey */
@@ -90,6 +90,8 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .lede { margin: var(--s2) 0 0; color: var(--page-muted); max-width: 62ch; text-wrap: pretty; }
 
 .controls { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: center; }
+.ctl { display: inline-flex; align-items: center; gap: var(--s2); }
+.ctl-l { font: 500 14px/1 var(--sans); color: var(--page-muted); }
 .seg { display: inline-flex; border: 1px solid var(--page-line); border-radius: var(--r-control); background: var(--control); padding: 2px; }
 .seg button, .btn {
   font: 500 14px/1 var(--sans);
@@ -129,7 +131,10 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .term[data-cols="100"] .toasts { right: var(--s3); }
 .term[data-cols="100"] .pane { display: none; }
 
-.transcript { padding: var(--s4) var(--s4) var(--s3); min-width: 0; min-height: 0; overflow-y: auto; }
+.transcript { padding: var(--s4) var(--s4) var(--s3); min-width: 0; min-height: 0; overflow-y: auto; overflow-anchor: none; }
+.subbar { margin: 0 0 var(--s3); }
+.subtitle { margin: 0 0 var(--s3); }
+.line .sub .bad { color: var(--failed); }
 .line { margin: 0 0 var(--s2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .line.you { color: var(--you); }
 .line .mark { color: var(--term-ink); }
@@ -151,7 +156,24 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .group { color: var(--term-dim); margin: var(--s4) 0 var(--s2); }
 .keys { flex: none; margin: var(--s3) 0 0; padding-top: var(--s2); border-top: 1px solid var(--term-line); color: var(--term-dim); font-size: 12px; }
 
-.job { position: relative; margin-bottom: var(--s2); border-radius: 6px; }
+/* Session pane: Now is pinned above the list, the gauges below it. Jobs only mode hides every .sess part. */
+.pane[data-mode="jobs"] .sess { display: none; }
+.now { flex: none; margin: 0 0 var(--s1); padding: var(--s2) var(--s3); background: var(--term-raised); border-radius: 6px; min-height: 36px; }
+.now.idle .row > :first-child { white-space: normal; }
+.jobs-label { display: flex; justify-content: space-between; align-items: center; gap: var(--s2); }
+.none { margin: 0 0 var(--s2) var(--s2); }
+.rrow { padding: 0 var(--s2); margin-bottom: var(--s1); border-radius: 6px; }
+.rrow .r-tool { color: var(--term-ink); }
+.rrow .bad { color: var(--failed); }
+.foot { flex: none; margin: var(--s3) 0 0; padding-top: var(--s2); border-top: 1px solid var(--term-line); }
+.gauge { margin-bottom: var(--s2); }
+.cost { margin: 0; color: var(--term-dim); }
+.meter { position: relative; display: block; width: 24ch; height: 1.35em; line-height: 1.35; white-space: pre; overflow: hidden; }
+.m-empty { color: var(--term-faint); }
+.m-fill { position: absolute; left: 0; top: 0; clip-path: inset(0 100% 0 0); color: var(--accent); transition: clip-path 0.25s var(--ease); }
+.meter.hot .m-fill { color: var(--stalled); }
+
+.job, .agent { position: relative; margin-bottom: var(--s2); border-radius: 6px; }
 .row { display: flex; justify-content: space-between; gap: var(--s2); min-width: 0; }
 .row > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .row > :last-child { flex: none; white-space: pre; }
@@ -167,7 +189,10 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .job.finished .name { font-weight: 400; }
 .job.finished .ok { color: var(--done); }
 .job.finished .bad { color: var(--failed); }
-.job.enter { animation: fade-tint 1.6s var(--ease); }
+.agent.done .row-btn { color: var(--term-dim); }
+.agent.done .name { font-weight: 400; }
+.agent .ok { color: var(--done); }
+.job.enter, .agent.enter, .rrow.enter { animation: fade-tint 1.6s var(--ease); }
 @keyframes fade-tint { from { background: oklch(0.8 0.14 72 / 0.14); } to { background: transparent; } }
 
 .row-btn {
@@ -251,7 +276,8 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .item > div { min-width: 0; }
 .item h3 { margin: 0; font-size: 16px; line-height: 1.4; font-weight: 600; }
 .item p { margin: var(--s1) 0 0; color: var(--page-muted); font-size: 15px; max-width: 64ch; text-wrap: pretty; }
-.item code, .facts code { font: 13.5px var(--mono); color: var(--page-ink); overflow-wrap: anywhere; }
+.item code, .facts code, .gap code { font: 13.5px var(--mono); color: var(--page-ink); overflow-wrap: anywhere; }
+.gap { margin: var(--s5) 0 0; color: var(--page-muted); font-size: 15px; max-width: 80ch; text-wrap: pretty; }
 .item .btn { flex: none; }
 .facts { margin: var(--s5) 0 0; padding-top: var(--s4); border-top: 1px solid var(--page-line); color: var(--page-muted); font-size: 15px; max-width: 80ch; text-wrap: pretty; }
 
@@ -268,7 +294,8 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   .cols { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .line.enter, .job.enter, .toast, .winnote { animation: none; }
+  .line.enter, .job.enter, .agent.enter, .rrow.enter, .toast, .winnote { animation: none; }
+  .m-fill { transition: none; }
   .btn:active, .seg button:active { transform: none; }
 }
 </style>
@@ -277,16 +304,23 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 <div class="wrap">
   <header>
     <div>
-      <h1>Background jobs pane</h1>
-      <p class="lede">The shell-progress mod already draws a bar per job beside the chat and names the running jobs on the status line. This mockup adds the seven proposed features below, working on sample jobs. Switch to 100 columns to see what a narrow terminal shows.</p>
+      <h1>Session and jobs pane</h1>
+      <p class="lede">The shell-progress mod already draws a bar per job beside the chat and names the running jobs on the status line. This mockup shows a proposed session pane, which follows Claude's work in every chat, and seven features for the job rows. Switch the pane to Jobs only to compare it with the scope the mod has today.</p>
     </div>
     <div class="controls">
+      <div class="ctl">
+        <span class="ctl-l" id="pane-l">Pane</span>
+        <div class="seg" role="group" aria-labelledby="pane-l">
+          <button type="button" data-pane="session" aria-pressed="true">This session</button>
+          <button type="button" data-pane="jobs" aria-pressed="false">Jobs only</button>
+        </div>
+      </div>
       <div class="seg" role="group" aria-label="Terminal width">
         <button type="button" data-cols="160" aria-pressed="true">160 columns</button>
         <button type="button" data-cols="100" aria-pressed="false">100 columns</button>
       </div>
       <button type="button" class="btn" id="pause" aria-pressed="false">Pause live updates</button>
-      <button type="button" class="btn" id="restart">Restart jobs</button>
+      <button type="button" class="btn" id="restart">Restart simulation</button>
     </div>
   </header>
 
@@ -304,20 +338,48 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
           <p class="line"><span class="mark">●</span> <span class="tool">Bash</span>(./scripts/build.sh)<br><span class="sub">  ⎿  Running in the background</span></p>
           <p class="line"><span class="mark">●</span> <span class="tool">Bash</span>(pwsh -File scripts/test-suite.ps1)<br><span class="sub">  ⎿  Running in the background</span></p>
           <p class="line"><span class="mark">●</span> <span class="tool">Bash</span>(./scripts/sync-fixtures.sh)<br><span class="sub">  ⎿  Running in the background</span></p>
-          <p class="line"><span class="mark">●</span> <span class="tool">Read</span>(docs/migrations.md)<br><span class="sub">  ⎿  Read 84 lines</span></p>
         </section>
 
-        <aside class="pane" aria-label="Background jobs pane" id="pane">
+        <section class="transcript" aria-label="Subagent transcript" id="subview" tabindex="0" hidden>
+          <div class="subbar"><button type="button" class="act" id="back">Back to main conversation</button></div>
+          <p class="group subtitle" id="subtitle"></p>
+          <div id="subbody"></div>
+        </section>
+
+        <aside class="pane" aria-label="Session pane" id="pane" data-mode="session">
           <div class="pane-head">
-            <span class="pane-title">Background jobs</span>
-            <span class="pane-count"><span id="count"></span><button type="button" class="link" id="unhide" hidden></button></span>
+            <span class="pane-title" id="pane-title">This session</span>
+            <span class="pane-count" id="head-right">
+              <span class="sess" id="turn"></span>
+              <span id="jobcount"><span id="count"></span><button type="button" class="link" id="unhide" hidden></button></span>
+            </span>
+          </div>
+          <div class="now sess" id="now">
+            <div class="row"><span><span class="spin" id="now-spin" aria-hidden="true"></span><span class="name" id="now-tool"></span> <span class="step" id="now-arg"></span></span><span class="step" id="now-t"></span></div>
           </div>
           <div class="pane-list">
+            <div class="group sess">Recent</div>
+            <div class="sess" id="recent"><p class="step none" id="recent-none">Nothing finished yet.</p></div>
+            <div class="group sess">Agents</div>
+            <div class="sess" id="agents"></div>
+            <div class="group sess jobs-label" id="jobs-label"><span>Jobs</span></div>
+            <p class="step none sess" id="nojobs" hidden>No scripts reporting progress.</p>
             <div id="running"></div>
             <div class="group" id="finished-label">Finished</div>
             <div id="finished"></div>
           </div>
-          <p class="keys">enter details · s stop · d dismiss · a ask · c copy</p>
+          <div class="foot sess">
+            <div class="gauge">
+              <div class="row"><span>context</span><span id="ctx-r"></span></div>
+              <span class="meter" id="ctx-m" role="meter" aria-label="Context used" aria-valuemin="0" aria-valuemax="100"><span class="m-empty" aria-hidden="true"></span><span class="m-fill" aria-hidden="true"></span></span>
+            </div>
+            <div class="gauge">
+              <div class="row"><span>5-hour limit</span><span id="lim-r"></span></div>
+              <span class="meter" id="lim-m" role="meter" aria-label="Five-hour limit used" aria-valuemin="0" aria-valuemax="100"><span class="m-empty" aria-hidden="true"></span><span class="m-fill" aria-hidden="true"></span></span>
+            </div>
+            <p class="cost" id="cost"></p>
+          </div>
+          <p class="keys" id="keys">enter details · v view agent · s stop · d dismiss · a ask</p>
         </aside>
       </div>
 
@@ -329,8 +391,12 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     <div class="winstack" id="winstack"></div>
 
     <section class="proposals" aria-labelledby="proposals-h">
-      <h2 id="proposals-h">Seven proposals</h2>
+      <h2 id="proposals-h">Proposals</h2>
       <ol class="plist">
+        <li><div class="item"><div>
+          <h3>Session pane</h3>
+          <p>The pane follows the session as well as the scripts: the tool Claude is running now, the last few it ran, its subagents, and how full the context and the five-hour limit are. Uses the <code>tool.call</code>, <code>turn.start</code> and <code>turn.complete</code> hooks, <code>$.agent.list()</code>, <code>$.ui.view</code> and <code>$.session.usage()</code>.</p>
+        </div><button type="button" class="btn" data-demo="session" aria-label="Show session pane">Show</button></div></li>
         <li><div class="item"><div>
           <h3>Rows that expand</h3>
           <p>Each job row is a button. Press it to open the file path, pid, start time and exit code under the row. Uses <code>Button</code> with <code>onPress</code>.</p>
@@ -360,6 +426,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
           <p>End a running job from its row, after a confirmation that names the job and its pid. Uses <code>$.process.run</code>.</p>
         </div><button type="button" class="btn" data-demo="7" aria-label="Show stop">Show</button></div></li>
       </ol>
+      <p class="gap">Not shown: shells Claude starts in the background. The <code>tool.call</code> hook sees one start, but the call returns at once, so the pane would not see it end. That needs testing before the pane promises it.</p>
       <p class="facts">While a script runs, its file holds one line, <code>&lt;startedEpochSec&gt; &lt;step&gt; &lt;total&gt; &lt;label...&gt;</code>, in <code>.claude/progress/&lt;script&gt;-&lt;pid&gt;.txt</code>. When it finishes the line becomes <code>&lt;startedEpochSec&gt; done &lt;exitCode&gt; &lt;endedEpochSec&gt;</code>. A script with no step count writes a total of 0 and gets a spinner and elapsed time instead of a bar, like sync-fixtures.sh here. In a terminal narrower than 144 columns the pane does not open by itself, which leaves the status line, written at every width; <code>/progress</code> opens the pane at any width.</p>
     </section>
   </main>
@@ -611,6 +678,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     setHidden($("unhide"), hiddenN === 0);
     setText($("unhide"), `${hiddenN} hidden`);
     setHidden($("finished-label"), !vis.some(j => j.status === "finished"));
+    setHidden($("nojobs"), vis.length > 0);
 
     const narrow = $("term").dataset.cols === "100";
     const part = j => {
@@ -632,6 +700,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   function render() {
     jobs.forEach(updateJob);
     updateSummary();
+    renderSession();
   }
 
   /* ---------- Transcript ---------- */
@@ -716,6 +785,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     if (paused) return;
     frame++;
     if (restartIn !== null && (restartIn -= dt) <= 0) restart();
+    simTick(dt);
     const live = [...jobs.values()].filter(j => j.status === "running");
     live.forEach(j => { j.elapsed += dt; j.due -= dt; });
     // One state change per tick, so each can be followed.
@@ -734,10 +804,285 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
       if (old) { clearTimeout(old.copyTimer); old.copyTimer = null; Object.assign(old, o); }
       else { jobs.set(o.id, o); createView(o); }
     });
-    document.querySelectorAll(".line.dyn").forEach(n => n.remove());
+    document.querySelectorAll(".line.dyn:not(.tc)").forEach(n => n.remove());
     popups.splice(0).forEach(p => p.el.remove());
     jobs.forEach(j => j.v.root.classList.remove("enter"));
     place();
+    render();
+  }
+
+  /* ---------- Session pane: scripted tool calls, subagents and gauges ---------- */
+  const MAX_TOOL_LINES = 30;
+  const IDLE_GAP = 6;
+  const CLOCK0 = 14 * 3600 + 3 * 60 + 43;
+  const fmtClock = s => [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map(n => String(n).padStart(2, "0")).join(":");
+
+  // One turn: each call starts `at` seconds into the turn and runs for `dur`. The last call ends at 25 s.
+  const TURN = [
+    { tool: "Read", arg: "docs/migrations.md", at: 1.5, dur: 1, res: "Read 84 lines" },
+    { tool: "Grep", arg: '"orders" in migrations/', at: 4, dur: 1, res: "Found 3 files" },
+    { tool: "Bash", arg: "npm test -- orders", at: 6.5, dur: 6, res: "Exit code 1", bad: true },
+    { tool: "Read", arg: "migrations/0007_orders_index.sql", at: 14, dur: 1, res: "Read 31 lines" },
+    { tool: "Edit", arg: "migrations/0007_orders_index.sql", at: 16.5, dur: 2, res: "Updated with 2 additions" },
+    { tool: "Bash", arg: "npm test -- orders", at: 20, dur: 5, res: "12 tests passed" },
+  ];
+
+  const AGENT_SPECS = [
+    { id: "review-migrations", hex: "a3f9c1", type: "router-expert", startAt: 0, runFor: 40, talk: [
+      { k: "you", text: "Review migrations/ for anything that would fail when 0007 applies" },
+      { k: "tool", tool: "Read", arg: "migrations/0006_orders.sql", res: "Read 52 lines" },
+      { k: "tool", tool: "Grep", arg: '"CREATE INDEX" in migrations/', res: "Found 4 matches" },
+      { k: "say", text: "0007 builds its index before the orders table exists on a fresh database. Move it after 0006." },
+    ] },
+    { id: "find-callers", hex: "7be204", type: "router-scout", startAt: 10, runFor: 25, talk: [
+      { k: "you", text: "Find every caller of the orders index helper" },
+      { k: "tool", tool: "Grep", arg: '"ensure_orders_index" in src/', res: "Found 6 matches" },
+      { k: "tool", tool: "Read", arg: "src/db/orders.ts", res: "Read 118 lines" },
+      { k: "say", text: "6 callers, all in src/db and src/jobs. None pass a schema name." },
+    ] },
+  ];
+  const seedAgents = () => AGENT_SPECS.map(s => ({ ...s, started: fmtClock(CLOCK0 + s.startAt), status: "waiting", elapsed: 0, open: false }));
+
+  const freshSession = () => ({
+    t: 0, phase: "turn", turnT: 0, idleT: 0, next: 0, cur: null, recent: [], fresh: false,
+    ctx: 38, limit: 63, cents: 184, lastTurn: 0,
+  });
+  let S = freshSession();
+  const agents = new Map();
+  const recentRows = [];
+  let viewing = null;
+  let mainView = { top: 0, end: true };
+
+  const agentOf = el => { const r = el.closest(".agent"); return r ? agents.get(r.dataset.id) : null; };
+  const atEnd = t => t.hidden || t.scrollHeight - t.scrollTop - t.clientHeight < 48;
+  const flash = el => { el.classList.remove("enter"); void el.offsetWidth; el.classList.add("enter"); };
+
+  function createRecentRows() {
+    for (let i = 0; i < 4; i++) {
+      const root = document.createElement("div");
+      root.className = "rrow";
+      root.hidden = true;
+      root.innerHTML = `<div class="row"><span><span class="r-tool"></span> <span class="step r-arg"></span></span><span><span class="step r-dur"></span><span class="bad r-bad"></span></span></div>`;
+      root.addEventListener("animationend", e => { if (e.target === root) root.classList.remove("enter"); });
+      $("recent").appendChild(root);
+      const q = s => root.querySelector(s);
+      recentRows.push({ root, tool: q(".r-tool"), arg: q(".r-arg"), dur: q(".r-dur"), bad: q(".r-bad") });
+    }
+  }
+
+  function createAgentView(a) {
+    const root = document.createElement("div");
+    root.className = "agent";
+    root.dataset.id = a.id;
+    root.hidden = true;
+    root.innerHTML = `
+      <button type="button" class="row-btn" data-act="toggle" aria-expanded="false" aria-controls="d-agent-${a.id}">
+        <span class="row"><span class="name"></span><span class="step"></span></span>
+        <span class="row r3"><span class="step"><span class="spin" aria-hidden="true"></span><span class="st"></span></span><span class="step t3"></span></span>
+      </button>
+      <div class="details" id="d-agent-${a.id}" role="group" aria-label="${a.id} details" inert>
+        <div class="details-in"><div class="details-pad">
+          <p class="meta"><span>agent id ${a.hex}</span><span>type ${a.type}</span><span>started ${a.started}</span></p>
+          <div class="actions"><button type="button" class="act" data-act="view">Open ${a.id} transcript</button></div>
+        </div></div>
+      </div>`;
+    const q = s => root.querySelector(s);
+    a.v = { root, btn: q(".row-btn"), spin: q(".spin"), st: q(".st"), t3: q(".t3"), det: q(".details"), view: q('[data-act="view"]'), last: null, wasOpen: false };
+    setText(q(".name"), a.id);
+    setText(q(".row .step"), a.type);
+    root.addEventListener("animationend", e => { if (e.target === root) root.classList.remove("enter"); });
+    $("agents").appendChild(root);
+  }
+
+  function updateAgent(a) {
+    const v = a.v, started = a.status !== "waiting", running = a.status === "running";
+    setHidden(v.root, !started);
+    if (!started) { v.last = null; return; }
+    if (v.last !== a.status) { v.last = a.status; flash(v.root); }
+    v.root.classList.toggle("done", !running);
+    v.btn.setAttribute("aria-expanded", String(a.open));
+    if (v.wasOpen !== a.open) {
+      v.wasOpen = a.open;
+      v.det.toggleAttribute("data-open", a.open);
+      v.det.inert = !a.open;
+      if (a.open && !reduce.matches && v.det.animate) {
+        v.det.animate([{ height: "0px", opacity: 0 }, { height: `${v.det.scrollHeight}px`, opacity: 1 }], { duration: 200, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
+      }
+    }
+    setHidden(v.spin, !running);
+    if (running) setText(v.spin, (reduce.matches ? "…" : SPIN[frame % SPIN.length]) + " ");
+    setText(v.st, a.status);
+    v.st.classList.toggle("ok", !running);
+    setText(v.t3, fmt(a.elapsed));
+  }
+
+  function setGauge(prefix, pct, right) {
+    const m = $(`${prefix}-m`), f = m.lastElementChild;
+    const w = `inset(0 ${100 - pct}% 0 0)`;
+    if (f.style.clipPath !== w) f.style.clipPath = w;
+    m.classList.toggle("hot", pct >= 80);
+    m.setAttribute("aria-valuenow", String(pct));
+    m.setAttribute("aria-valuetext", right.replace(/\s+/g, " "));
+    setText($(`${prefix}-r`), right);
+  }
+
+  function renderSession() {
+    const s = S, turning = s.phase === "turn";
+    setText($("turn"), turning ? `turn ${fmt(s.turnT)}` : "waiting for you");
+
+    const spin = $("now-spin");
+    $("now").classList.toggle("idle", !turning);
+    setHidden(spin, !turning);
+    if (turning) setText(spin, (reduce.matches ? "…" : SPIN[frame % SPIN.length]) + " ");
+    if (s.cur) {
+      setText($("now-tool"), s.cur.tool);
+      setText($("now-arg"), s.cur.arg);
+      setText($("now-t"), `${Math.floor(s.turnT - s.cur.at)}s`);
+    } else {
+      setText($("now-tool"), "");
+      setText($("now-arg"), turning ? "Thinking" : `Waiting for you · last turn took ${fmt(s.lastTurn)}`);
+      setText($("now-t"), "");
+    }
+
+    recentRows.forEach((r, i) => {
+      const e = s.recent[i];
+      setHidden(r.root, !e);
+      if (!e) return;
+      setText(r.tool, e.tool);
+      setText(r.arg, e.arg);
+      setText(r.dur, `${e.dur}s`);
+      setText(r.bad, e.bad ? " failed" : "");
+    });
+    setHidden($("recent-none"), s.recent.length > 0);
+    if (s.fresh) { s.fresh = false; flash(recentRows[0].root); }
+
+    agents.forEach(updateAgent);
+    setGauge("ctx", s.ctx, `${s.ctx}%  ${s.ctx * 2}k of 200k`);
+    setGauge("lim", s.limit, `${s.limit}%  resets 16:00`);
+    setText($("cost"), `session cost $${(s.cents / 100).toFixed(2)}`);
+  }
+
+  function trimToolLines(t, follow) {
+    const lines = t.querySelectorAll(".line.tc");
+    let n = lines.length;
+    while (n >= MAX_TOOL_LINES) {
+      const before = t.scrollHeight;
+      lines[lines.length - n].remove();
+      n--;
+      if (!follow && !t.hidden) t.scrollTop = Math.max(0, t.scrollTop - (before - t.scrollHeight));
+    }
+  }
+
+  function startCall() {
+    const c = S.cur = { ...TURN[S.next++] };
+    const t = $("transcript");
+    const follow = atEnd(t);
+    trimToolLines(t, follow);
+    c.line = addLine(`<span class="mark">●</span> <span class="tool">${c.tool}</span>(${esc(c.arg)})`, "tc");
+    if (follow && !t.hidden) t.scrollTop = t.scrollHeight;
+    S.ctx = Math.min(100, S.ctx + 1);
+    S.cents += 3;
+  }
+
+  function endCall() {
+    const c = S.cur, t = $("transcript");
+    const follow = atEnd(t);
+    const res = c.bad ? `<span class="bad">${esc(c.res)}</span>` : esc(c.res);
+    c.line.insertAdjacentHTML("beforeend", `<br><span class="sub">  ⎿  ${res}</span>`);
+    if (follow && !t.hidden) t.scrollTop = t.scrollHeight;
+    S.recent.unshift({ tool: c.tool, arg: c.arg, dur: c.dur, bad: !!c.bad });
+    S.recent.length = Math.min(S.recent.length, 4);
+    S.fresh = true;
+    S.cur = null;
+  }
+
+  function endTurn() {
+    S.phase = "idle";
+    S.lastTurn = S.turnT;
+    S.idleT = 0;
+    S.limit = Math.min(100, S.limit + 1);
+  }
+
+  function startTurn() {
+    S.phase = "turn";
+    S.turnT = 0;
+    S.next = 0;
+    S.cur = null;
+  }
+
+  function stepAgents() {
+    agents.forEach(a => {
+      if (a.status === "waiting" && S.t >= a.startAt) a.status = "running";
+      if (a.status === "running") {
+        a.elapsed = S.t - a.startAt;
+        if (a.elapsed >= a.runFor) { a.elapsed = a.runFor; a.status = "completed"; }
+      }
+    });
+  }
+
+  function simTick(dt) {
+    S.t += dt;
+    stepAgents();
+    if (S.phase === "idle") {
+      S.idleT += dt;
+      if (S.idleT >= IDLE_GAP) startTurn();
+      return;
+    }
+    S.turnT += dt;
+    if (S.cur && S.turnT >= S.cur.at + S.cur.dur) endCall();
+    if (!S.cur) {
+      if (S.next < TURN.length) { if (S.turnT >= TURN[S.next].at) startCall(); }
+      else endTurn();
+    }
+  }
+
+  function resetSession() {
+    closeView(false);
+    document.querySelectorAll(".line.tc").forEach(n => n.remove());
+    S = freshSession();
+    seedAgents().forEach(o => {
+      const old = agents.get(o.id);
+      if (old) Object.assign(old, o);
+      else { agents.set(o.id, o); createAgentView(o); }
+    });
+    stepAgents();
+    render();
+  }
+
+  const talkLine = l => {
+    if (l.k === "you") return `<p class="line you">&gt; ${esc(l.text)}</p>`;
+    if (l.k === "tool") return `<p class="line"><span class="mark">●</span> <span class="tool">${l.tool}</span>(${esc(l.arg)})<br><span class="sub">  ⎿  ${esc(l.res)}</span></p>`;
+    return `<p class="line"><span class="mark">●</span> ${esc(l.text)}</p>`;
+  };
+
+  function openView(a) {
+    if (viewing) return;
+    const t = $("transcript");
+    mainView = { top: t.scrollTop, end: atEnd(t) };
+    setText($("subtitle"), `Subagent ${a.id} · ${a.type}`);
+    $("subbody").innerHTML = a.talk.map(talkLine).join("");
+    viewing = a;
+    t.hidden = true;
+    $("subview").hidden = false;
+    $("subview").scrollTop = 0;
+    $("back").focus();
+    announce(`Showing the ${a.id} transcript`);
+  }
+
+  function closeView(focus) {
+    if (!viewing) return;
+    const a = viewing, t = $("transcript");
+    viewing = null;
+    $("subview").hidden = true;
+    t.hidden = false;
+    t.scrollTop = mainView.end ? t.scrollHeight : mainView.top;
+    if (focus) (a.open ? a.v.view : a.v.btn).focus();
+    announce("Back in the main conversation");
+  }
+
+  function setAgentOpen(a, open) {
+    if (!open && a.v.det.contains(document.activeElement)) a.v.btn.focus();
+    a.open = open;
     render();
   }
 
@@ -831,6 +1176,12 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     const b = e.target.closest("button");
     if (!b) return;
     if (b.id === "unhide") { unhideAll(); return; }
+    const ag = agentOf(b);
+    if (ag) {
+      if (b.dataset.act === "toggle") setAgentOpen(ag, !ag.open);
+      else if (b.dataset.act === "view") openView(ag);
+      return;
+    }
     const j = jobOf(b);
     if (!j) return;
     switch (b.dataset.act) {
@@ -846,6 +1197,8 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 
   $("pane").addEventListener("keydown", e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const ag = agentOf(e.target);
+    if (ag) { if (e.key.toLowerCase() === "v") openView(ag); return; }
     const j = jobOf(e.target);
     if (!j) return;
     if (e.key === "Escape") { if (j.confirm) { e.preventDefault(); cancelStop(j); } return; }
@@ -858,8 +1211,26 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   });
 
   /* ---------- Page controls ---------- */
+  function setPane(mode) {
+    const session = mode === "session";
+    document.querySelectorAll("button[data-pane]").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.pane === mode)));
+    $("pane").dataset.mode = mode;
+    $("pane").setAttribute("aria-label", session ? "Session pane" : "Background jobs pane");
+    setText($("pane-title"), session ? "This session" : "Background jobs");
+    setText($("keys"), session ? "enter details · v view agent · s stop · d dismiss · a ask" : "enter details · s stop · d dismiss · a ask · c copy");
+    (session ? $("jobs-label") : $("head-right")).appendChild($("jobcount"));
+    if (!session) closeView(false);
+    const url = new URL(location.href);
+    url.searchParams.set("pane", mode);
+    try { history.replaceState(null, "", url); } catch (e) { /* file: URLs may refuse */ }
+    render();
+  }
+  document.querySelectorAll("button[data-pane]").forEach(b => b.addEventListener("click", () => setPane(b.dataset.pane)));
+  $("back").addEventListener("click", () => closeView(true));
+  $("subview").addEventListener("keydown", e => { if (e.key === "Escape") closeView(true); });
+
   function setCols(cols) {
-    document.querySelectorAll(".seg button").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.cols === cols)));
+    document.querySelectorAll("button[data-cols]").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.cols === cols)));
     $("term").dataset.cols = cols;
     $("cols").textContent = `${cols} × 34`;
     const url = new URL(location.href);
@@ -867,7 +1238,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     try { history.replaceState(null, "", url); } catch (e) { /* file: URLs may refuse */ }
     render();
   }
-  document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => setCols(b.dataset.cols)));
+  document.querySelectorAll("button[data-cols]").forEach(b => b.addEventListener("click", () => setCols(b.dataset.cols)));
 
   $("pause").addEventListener("click", e => {
     paused = !paused;
@@ -877,7 +1248,8 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 
   $("restart").addEventListener("click", () => {
     restart();
-    announce("Jobs restarted");
+    resetSession();
+    announce("Simulation restarted");
   });
 
   /* ---------- "Show" buttons ---------- */
@@ -890,6 +1262,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   const needsBuild = () => { needsWide(); if (jobs.get("build").status !== "running") restart(); return jobs.get("build"); };
 
   const demos = {
+    session() { setPane("session"); setCols("160"); reveal(null); },
     1() { needsWide(); const j = jobs.get("build"); j.open = true; render(); reveal(j); },
     2() {
       needsWide();
@@ -915,6 +1288,13 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   /* ---------- Start ---------- */
   seed().forEach(o => { jobs.set(o.id, o); createView(o); });
   place();
+  createRecentRows();
+  $("ctx-m").firstElementChild.textContent = "░".repeat(BAR);
+  $("ctx-m").lastElementChild.textContent = "█".repeat(BAR);
+  $("lim-m").firstElementChild.textContent = "░".repeat(BAR);
+  $("lim-m").lastElementChild.textContent = "█".repeat(BAR);
+  resetSession();
+  setPane(new URLSearchParams(location.search).get("pane") === "jobs" ? "jobs" : "session");
   setCols(new URLSearchParams(location.search).get("cols") === "100" ? "100" : "160");
   lastTick = performance.now();
   setInterval(tick, 120);
