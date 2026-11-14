@@ -105,7 +105,13 @@ case $_progress_dir in
     /* | [A-Za-z]:[/\\]*) ;;
     *) _progress_dir=$PWD/$_progress_dir ;;
 esac
-_progress_file="$_progress_dir/$_progress_name-$$.txt"
+# Under Git Bash and Cygwin, $$ is the emulation layer's own pid, which no
+# Windows tool knows. The mod matches a job to its Windows process, so the
+# file names the Windows pid wherever /proc exposes one.
+_progress_pid=
+{ read -r _progress_pid < "/proc/$$/winpid"; } 2>/dev/null || true
+[[ $_progress_pid =~ ^[0-9]+$ ]] || _progress_pid=$$
+_progress_file="$_progress_dir/$_progress_name-$_progress_pid.txt"
 _progress_epoch _progress_started
 
 mkdir -p "$_progress_dir" 2>/dev/null || _progress_warn "$_progress_dir"

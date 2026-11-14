@@ -32,7 +32,10 @@ negative code, such as -1073741819 for an access violation.
 
 The file is `<progress dir>/<script file name>-<pid>.txt`, and the script file
 name keeps its extension, for example `build.sh-1234.txt`. Two runs of the same
-script therefore write two files. The start time is captured once, when the
+script therefore write two files. The pid is the one Windows tools show: under
+Git Bash and Cygwin the Bash helper reads it from `/proc/$$/winpid`, because
+`$$` there is the emulation layer's own number, and elsewhere it uses `$$`.
+The start time is captured once, when the
 helper is loaded, and every later write reuses it. Files are written to a
 temporary name and renamed into place, so a reader never sees half a line.
 
