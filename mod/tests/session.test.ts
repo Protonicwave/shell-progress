@@ -188,6 +188,16 @@ describe('usageBars', () => {
     ])
   })
 
+  test('a percentage that is not a finite number leaves its bar out', () => {
+    const bars = usageBars(
+      usage({
+        context: { window: 200_000, percent: Number.NaN },
+        rateLimits: [{ kind: 'five_hour', percentUsed: Number.POSITIVE_INFINITY }],
+      }),
+    )
+    expect(bars).toEqual([])
+  })
+
   test('a fresh session with no limit reading has no bars', () => {
     expect(usageBars(usage({}))).toEqual([])
   })

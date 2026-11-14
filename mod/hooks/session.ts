@@ -118,18 +118,18 @@ const FIVE_HOUR_LIMIT_KIND = 'five_hour'
 
 /**
  * The context window's bar and the five-hour limit's, each only when the
- * session has its reading: none before the first response, and no limit off a
- * subscription.
+ * session has its reading: none before the first response, no limit off a
+ * subscription, and neither for a percentage that is not a finite number.
  */
 export function usageBars(usage: SessionUsage): readonly UsageBar[] {
   const bars: UsageBar[] = []
   const { tokens, window, percent } = usage.context
-  if (percent !== undefined) {
+  if (percent !== undefined && Number.isFinite(percent)) {
     const of = tokens === undefined ? '' : ` · ${tokensText(tokens)} of ${tokensText(window)}`
     bars.push(usageBar('context', percent, of))
   }
   const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
-  if (limit !== undefined) {
+  if (limit !== undefined && Number.isFinite(limit.percentUsed)) {
     const resets = limit.resetsAt === undefined ? undefined : new Date(limit.resetsAt)
     const isValid = resets !== undefined && !Number.isNaN(resets.getTime())
     // ECMA-262 fixes toTimeString's form as `HH:mm:ss GMT+hhmm (zone)`.
