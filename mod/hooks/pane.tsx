@@ -9,6 +9,7 @@ import {
   clockTimeText,
   durationText,
   finishedText,
+  isFinished,
   isStalled,
   remainingSeconds,
   remainingText,
@@ -73,9 +74,9 @@ type PaneView = {
 }
 
 /**
- * Draws the session as `docs/mockup.html` shows it: the call running now, the
- * jobs, the agents, the last calls, then the usage bars and the cost. A group
- * with nothing in it is left out.
+ * Draws the session: the call running now, the jobs, the agents, the last
+ * calls, then the usage bars and the cost. A group with nothing in it is left
+ * out.
  */
 export function drawPane(ui: PaneElements, view: PaneView) {
   const { Box, Text } = ui
@@ -238,7 +239,7 @@ function jobsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      {spreadRow(ui, <Text dimColor>Jobs</Text>, jobsCount(ui, view, count, hiddenCount))}
+      {spreadRow(ui, <Text dimColor>Jobs</Text>, jobsHeadingEnd(ui, view, count, hiddenCount))}
       {unfinished.map(job => (
         <Box key={job.file} flexDirection="column" marginTop={1}>
           {unfinishedRows(ui, view, job)}
@@ -270,8 +271,8 @@ function countText(
   return unfinishedCount === 0 && finishedCount > 0 ? 'all finished' : undefined
 }
 
-/** The jobs label's right side: the count, then a button that shows the hidden jobs again. */
-function jobsCount(
+/** The right of the Jobs heading: the count, then a button that shows the hidden jobs again. */
+function jobsHeadingEnd(
   { Box, Button, Text }: PaneElements,
   view: PaneView,
   count: string | undefined,
@@ -396,9 +397,7 @@ function jobDetails(ui: PaneElements, view: PaneView, job: Job, canDismiss: bool
     <Box flexDirection="column" marginLeft={2}>
       <Text dimColor wrap="truncate-start">{`${view.progressDir}/${job.file}`}</Text>
       <Text dimColor>{facts.join(' · ')}</Text>
-      {job.line?.kind === 'finished' &&
-        job.line.exitCode !== 0 &&
-        askClaudeControl(ui, view, { ...job, line: job.line })}
+      {isFinished(job) && job.line.exitCode !== 0 && askClaudeControl(ui, view, job)}
       {key !== undefined && (
         <Button
           key={`dismiss:${job.file}`}
@@ -423,7 +422,7 @@ function askClaudeControl({ Button, Text }: PaneElements, view: PaneView, job: F
 }
 
 /**
- * A job's first row: its name button and `right`, which keeps its full width.
+ * A job's or an agent's row: its name button and `right`, which keeps its full width.
  * A Button cannot be cut with an ellipsis, so a name wider than the pane wraps.
  */
 function nameRow({ Box }: PaneElements, name: RenderNode, right: RenderNode) {

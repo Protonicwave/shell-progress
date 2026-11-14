@@ -281,6 +281,6 @@ function isUnfinished(job: Job): job is UnfinishedJob {
   return job.line?.kind !== 'finished'
 }
 
-function isFinished(job: Job): job is FinishedJob {
+export function isFinished(job: Job): job is FinishedJob {
   return job.line?.kind === 'finished'
 }
