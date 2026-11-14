@@ -168,6 +168,10 @@ pane, the mod's status line under the prompt carries the same figures, after
 any running jobs: `ctx 38% · 5h 63% · $1.84`. They leave the status line
 when the pane comes back into view, so each figure is on screen once.
 
+The mod leaves Claude Code's prompt hint, the line with the permission mode,
+as it is. A mod can only replace that line with one plain string, which would
+drop the permission mode's colour and stop the agent count from updating.
+
 Under Jobs, the pane lists each running job with a bar, its step and total, its label and
 the time since it started. From its third step a job also shows about how long
 it has left, from its average time per step so far, until it reaches its last
