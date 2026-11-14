@@ -257,43 +257,56 @@ function startPolling(
   stallMs: number,
   notifySeconds: number,
 ): void {
-  let isPolling = false
-  let skippedTicks = 0
   // `null` until the first poll, so a reload always replaces whatever the
   // previous copy of the module left on the status line.
   let shownStatus: string | undefined | null = null
   const jobsFailure = failureLog($, `cannot poll ${dir}`)
   const agentsFailure = failureLog($, 'cannot list agents')
+  // Separate, so a hung agent list cannot hold up the jobs, or the reverse.
+  const tickJobs = unlessUnsettled($, `a poll of ${dir}`, () =>
+    pollOnce($, dir, stallMs, notifySeconds).then(summary => {
+      jobsFailure.clear()
+      if (summary === shownStatus) return
+      shownStatus = summary
+      $.ui.status(summary)
+    }, jobsFailure.record),
+  )
+  // On a failure the stored agents stay, so the pane keeps the last list.
+  const tickAgents = unlessUnsettled($, 'a listing of agents', () =>
+    pollAgents($).then(agentsFailure.clear, agentsFailure.record),
+  )
 
   // The timer lives until the module reloads, which drops it with the
   // environment, so nothing needs to cancel it.
   $.clock.every(POLL_INTERVAL_MS, () => {
-    if (isPolling) {
-      // fs calls take no timeout, so a hung read cannot be cancelled; the
-      // poll is left to settle, and the log says why the pane stopped moving.
+    tickJobs()
+    tickAgents()
+  })
+}
+
+/**
+ * A tick that starts `work` unless its last run has not settled, so runs never
+ * overlap. `work` must not reject. Neither fs calls nor `agent.list` take a
+ * timeout, so a hung run cannot be cancelled: it is left to settle, and once
+ * it has run for STUCK_POLL_MS the log says, once, why the pane stopped moving.
+ */
+function unlessUnsettled($: EngineInterface, work: string, run: () => Promise<void>): () => void {
+  let isRunning = false
+  let skippedTicks = 0
+  return () => {
+    if (isRunning) {
       skippedTicks += 1
       if (skippedTicks === Math.ceil(STUCK_POLL_MS / POLL_INTERVAL_MS)) {
-        $.ui.log(`shell-progress: a poll of ${dir} has not finished after ${STUCK_POLL_MS / 1000}s`)
+        $.ui.log(`shell-progress: ${work} has not finished after ${STUCK_POLL_MS / 1000}s`)
       }
       return
     }
-    isPolling = true
+    isRunning = true
     skippedTicks = 0
-    // Each half is settled by its own handlers, so the pair cannot reject, and
-    // the flag keeps polls from overlapping.
-    void Promise.all([
-      pollOnce($, dir, stallMs, notifySeconds).then(summary => {
-        jobsFailure.clear()
-        if (summary === shownStatus) return
-        shownStatus = summary
-        $.ui.status(summary)
-      }, jobsFailure.record),
-      // On a failure the stored agents stay, so the pane keeps the last list.
-      pollAgents($).then(agentsFailure.clear, agentsFailure.record),
-    ]).finally(() => {
-      isPolling = false
+    void run().finally(() => {
+      isRunning = false
     })
-  })
+  }
 }
 
 /**

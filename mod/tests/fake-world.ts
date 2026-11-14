@@ -55,6 +55,8 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     agents: [] as AgentInfo[],
     /** Set to make every later `$.agent.list` reject. */
     isAgentListFailing: false,
+    /** Set to make every later `$.agent.list` never settle. */
+    isAgentListHung: false,
     /** The agent ids the mod asked `$.ui.view` to show. */
     views: [] as (string | undefined)[],
     /** What each `$.ui.view` answers; a test may change it. */
@@ -115,7 +117,8 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     world.logs.push(e.text)
     return { value: undefined }
   })
-  on('agent.list', () => {
+  on('agent.list', async () => {
+    if (world.isAgentListHung) await new Promise<never>(() => {})
     // A hook that throws is skipped, and with none left the call rejects.
     if (world.isAgentListFailing) throw new Error('agent list unavailable')
     return { value: world.agents }

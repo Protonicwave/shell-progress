@@ -278,6 +278,19 @@ test('past five agents the newest five are drawn and the rest counted', async ($
   await ui.unmount()
 })
 
+test('an agent list that does not settle is logged once and the jobs poll goes on', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  await startSession($)
+  await clock.advance(POLL_MS)
+  world.isAgentListHung = true
+
+  const listsBefore = world.lists
+  await clock.advance(POLL_MS * 4)
+  expect(world.lists).toBe(listsBefore + 4)
+  await clock.advance(60_000)
+  expect(world.logs).toEqual(['shell-progress: a listing of agents has not finished after 30s'])
+})
+
 test('a failing agent list is logged once and the last list stays drawn', async ($, on) => {
   const { world, clock } = fakeWorld(on, new Map())
   world.agents = [agent('a1', 'review migrations')]
