@@ -4,7 +4,6 @@ import type { AgentInfo, AgentStatus, SessionUsage } from 'claude-code'
 import type { EndedCall, RunningCall, ToolCalls } from '../types'
 import {
   NO_TOOL_CALLS,
-  RECENT_CALL_COUNT,
   costText,
   shortDurationText,
   endTurnCalls,
@@ -68,7 +67,6 @@ describe('recordStart and recordEnd', () => {
     for (const id of ['a', 'b', 'c', 'd']) {
       calls = recordEnd(recordStart(calls, runningCall(id)), endedCall(id))
     }
-    expect(RECENT_CALL_COUNT).toBe(3)
     expect(calls.recent.map(call => call.id)).toEqual(['d', 'c', 'b'])
   })
 

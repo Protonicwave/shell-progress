@@ -4,7 +4,7 @@ import type { EndedCall, ListedAgent, RunningCall, ToolCalls } from '../types'
 import { MS_PER_SECOND, SECONDS_PER_MINUTE, clockTimeText, durationText } from './progress'
 
 /** How many ended calls the pane lists, newest first. */
-export const RECENT_CALL_COUNT = 3
+const RECENT_CALL_COUNT = 3
 // Parallel calls are few; past this the oldest is dropped, as the end of the
 // turn would drop it, so a call whose end is never heard cannot grow the list.
 const MAX_RUNNING_CALLS = 20
