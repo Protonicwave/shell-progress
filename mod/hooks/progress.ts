@@ -145,11 +145,12 @@ function twoDigits(value: number): string {
 
 /**
  * The seconds a running job has left at `nowMs`, from its average time per
- * step so far. `undefined` for a job with no step count or before step
- * FIRST_ESTIMATED_STEP.
+ * step so far. `undefined` for a job with no step count, before step
+ * FIRST_ESTIMATED_STEP, and at its last step, whose length no average of the
+ * earlier ones bounds.
  */
 export function remainingSeconds(line: RunningLine, nowMs: number): number | undefined {
-  if (line.total === 0 || line.step < FIRST_ESTIMATED_STEP) return undefined
+  if (line.total === 0 || line.step < FIRST_ESTIMATED_STEP || line.step >= line.total) return undefined
   const elapsedSec = Math.max(0, nowMs / MS_PER_SECOND - line.startedSec)
   return (elapsedSec / line.step) * (line.total - line.step)
 }

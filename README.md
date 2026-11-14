@@ -152,7 +152,8 @@ subscription.
 
 Under Jobs, the pane lists each running job with a bar, its step and total, its label and
 the time since it started. From its third step a job also shows about how long
-it has left, from its average time per step so far. A job with no step count
+it has left, from its average time per step so far, until it reaches its last
+step, which can take any time. A job with no step count
 shows a spinner instead of a bar. A running job whose file has not changed for
 10 minutes is marked stalled, with how long it ran before its file went quiet,
 which is how a script that was killed before it could write its finished line

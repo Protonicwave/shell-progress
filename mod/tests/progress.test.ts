@@ -258,8 +258,8 @@ describe('remainingSeconds', () => {
     expect(remainingSeconds(running(4, 10), NOW_MS)).toBe(150)
   })
 
-  test('gives none left at the last step', () => {
-    expect(remainingSeconds(running(10, 10), NOW_MS)).toBe(0)
+  test('gives none at the last step, which may run on for any time', () => {
+    expect(remainingSeconds(running(10, 10), NOW_MS)).toBeUndefined()
   })
 
   test('counts a start in the future as no time spent', () => {
