@@ -363,6 +363,22 @@ test('a job dismissed in an earlier session stays hidden', async ($, on) => {
   await ui.unmount()
 })
 
+test('a store that cannot be read is logged, and the jobs are polled and drawn', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['lint.sh-2.txt', { text: finishedLine(0, 22), mtimeMs: START_MS }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  world.isStoreFailing = true
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  expect((await ui.find({ type: 'Button', text: 'lint.sh' }))?.text).toBe('lint.sh')
+  expect(world.logs).toHaveLength(1)
+  expect(world.logs[0]).toMatch(/^shell-progress: cannot read dismissedJobs from the store: /)
+  await ui.unmount()
+})
+
 test('a stored dismissal list that is not a list of strings is logged and ignored', async ($, on) => {
   const files = new Map<string, FakeFile>([
     ['lint.sh-2.txt', { text: finishedLine(0, 22), mtimeMs: START_MS }],

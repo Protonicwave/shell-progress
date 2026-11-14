@@ -47,6 +47,8 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     isListingHung: false,
     /** The mod's `$.store`, which a test may fill before the session starts. */
     store: new Map<string, unknown>(),
+    /** Set to make every later `$.store.get` reject. */
+    isStoreFailing: false,
     toasts: [] as string[],
     notifications: [] as string[],
     /** What each `$.ui.notify` answers, or the hook's reason to deny it; a test may change it. */
@@ -100,7 +102,10 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     world.opens.push(e.id)
     return { value: world.openResult }
   })
-  on('store.get', (_, e) => ({ value: world.store.get(e.key) }))
+  on('store.get', (_, e) => {
+    if (world.isStoreFailing) throw new Error('store unavailable')
+    return { value: world.store.get(e.key) }
+  })
   on('store.set', (_, e) => {
     world.store.set(e.key, e.value)
     return { value: undefined }

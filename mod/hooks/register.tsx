@@ -214,14 +214,28 @@ async function submitQuestion($: EngineInterface, job: FinishedJob, key: string)
 }
 
 async function loadDismissedJobs($: EngineInterface): Promise<void> {
-  const stored = await $.store.get(DISMISSED_STORE_KEY)
-  const isValid = stored === undefined || isStringList(stored)
-  if (!isValid) {
-    // Only this mod writes the key, so another value is a hand edit; the next
-    // dismissal replaces it.
-    $.ui.log(`shell-progress: ignoring ${DISMISSED_STORE_KEY} in the store: expected a list of strings`)
+  const keys = await storedDismissals($)
+  await update($, dismissedJobs, () => keys)
+}
+
+/**
+ * The dismissals the store holds. A store that cannot be read, or that holds
+ * something else, is logged and gives none: the jobs matter more than which of
+ * them were hidden.
+ */
+async function storedDismissals($: EngineInterface): Promise<readonly string[]> {
+  let stored: unknown
+  try {
+    stored = await $.store.get(DISMISSED_STORE_KEY)
+  } catch (error: unknown) {
+    $.ui.log(`shell-progress: cannot read ${DISMISSED_STORE_KEY} from the store: ${errorMessage(error)}`)
+    return []
   }
-  await update($, dismissedJobs, () => (isStringList(stored) ? stored : []))
+  if (stored === undefined || isStringList(stored)) return stored ?? []
+  // Only this mod writes the key, so another value is a hand edit; the next
+  // dismissal replaces it.
+  $.ui.log(`shell-progress: ignoring ${DISMISSED_STORE_KEY} in the store: expected a list of strings`)
+  return []
 }
 
 function isStringList(value: unknown): value is readonly string[] {
