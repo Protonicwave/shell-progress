@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { AgentInfo, AgentStatus, ToolCallResult } from 'claude-code'
 
-import { POLL_MS, START_MS, fakeWorld, mountPane, startSession } from './fake-world'
+import { PANE, POLL_MS, START_MS, fakeWorld, mountPane, startSession } from './fake-world'
 
 const TURN_ID = 'turn-1'
 
@@ -170,26 +170,44 @@ test('a pane with no jobs, agents or calls draws none of their groups', async ($
   await ui.unmount()
 })
 
-test('the usage bars and the cost are drawn from the session\'s figures', async ($, on) => {
+const HIGH_USAGE = {
+  startedAt: START_MS,
+  context: { tokens: 170_000, window: 200_000, percent: 85 },
+  rateLimits: [{ kind: 'five_hour', percentUsed: 40 }],
+  cost: { usd: 1.84 },
+}
+
+test('each usage bar shares a row with its label and figures, and the cost follows', async ($, on) => {
   const { world } = fakeWorld(on, new Map())
-  world.usage = {
-    startedAt: START_MS,
-    context: { tokens: 170_000, window: 200_000, percent: 85 },
-    rateLimits: [{ kind: 'five_hour', percentUsed: 40 }],
-    cost: { usd: 1.84 },
-  }
+  world.usage = HIGH_USAGE
   await startSession($)
 
   const ui = await mountPane($)
-  expect((await ui.find({ type: 'Text', text: /^85% · / }))?.text).toBe('85% · 170k of 200k')
-  expect((await ui.find({ type: 'Text', text: /^40%$/ }))?.text).toBe('40%')
+  expect((await ui.find({ key: 'context' }))?.text).toMatch(/^context[█▏▎▍▌▋▊▉░]+85% · 170k of 200k$/)
+  expect((await ui.find({ key: '5h limit' }))?.text).toMatch(/^5h limit[█▏▎▍▌▋▊▉░]+40%$/)
   expect((await ui.find({ type: 'Text', text: /^session cost/ }))?.text).toBe('session cost $1.84')
-  // From 80% a bar turns to the warning colour.
+  // 40 columns less the label's 8, the widest figures' 18 and two gaps leave
+  // 12 cells for each bar. From 80% a bar turns to the warning colour.
   const filled = await ui.findAll({ type: 'Text', text: /^[█▏▎▍▌▋▊▉]+$/ })
   expect(filled.map(bar => [bar.text.length, bar.props['color']])).toEqual([
-    [33, 'warning'],
-    [16, 'claude'],
+    [11, 'warning'],
+    [5, 'claude'],
   ])
+  await ui.unmount()
+})
+
+test('below 40 columns each usage bar takes a row of its own under its label and figures', async ($, on) => {
+  const { world } = fakeWorld(on, new Map())
+  world.usage = HIGH_USAGE
+  await startSession($)
+
+  const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 39 }, surface: 'terminal' })
+  const context = await ui.find({ key: 'context' })
+  expect(context?.props['flexDirection']).toBe('column')
+  expect(context?.text).toMatch(/^context85% · 170k of 200k[█▏▎▍▌▋▊▉░]+$/)
+  // The full width less the two columns kept clear: 37 cells.
+  const filled = await ui.findAll({ type: 'Text', text: /^[█▏▎▍▌▋▊▉]+$/ })
+  expect(filled.map(bar => bar.text.length)).toEqual([32, 15])
   await ui.unmount()
 })
 
@@ -205,7 +223,7 @@ test('a figure the session lacks leaves its bar or line out', async ($, on) => {
 
   const ui = await mountPane($)
   expect(await ui.find({ type: 'Text', text: 'context' })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: '5-hour limit' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '5h limit' })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /^session cost/ }))?.text).toBe('session cost $0.00')
   await ui.unmount()
 })

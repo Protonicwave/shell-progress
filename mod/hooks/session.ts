@@ -103,8 +103,8 @@ function isSameAgents(left: readonly ListedAgent[], right: readonly ListedAgent[
   )
 }
 
-/** One bar under the pane's groups: what it measures, how full it is, and its figures. */
-export type UsageBar = {
+/** One usage bar at the foot of the pane: what it measures, how full it is, and its figures. */
+export type UsageRow = {
   readonly label: string
   /** From 0 to 1; a limit past 100% fills the bar. */
   readonly fraction: number
@@ -121,24 +121,24 @@ const FIVE_HOUR_LIMIT_KIND = 'five_hour'
  * session has its reading: none before the first response, no limit off a
  * subscription, and neither for a percentage that is not a finite number.
  */
-export function usageBars(usage: SessionUsage): readonly UsageBar[] {
-  const bars: UsageBar[] = []
+export function usageRows(usage: SessionUsage): readonly UsageRow[] {
+  const rows: UsageRow[] = []
   const { tokens, window, percent } = usage.context
   if (percent !== undefined && Number.isFinite(percent)) {
     const tokenFigures = tokens === undefined ? '' : ` · ${tokensText(tokens)} of ${tokensText(window)}`
-    bars.push(usageBar('context', percent, tokenFigures))
+    rows.push(usageRow('context', percent, tokenFigures))
   }
   const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
   if (limit !== undefined && Number.isFinite(limit.percentUsed)) {
     const resetsMs = limit.resetsAt === undefined ? Number.NaN : Date.parse(limit.resetsAt)
     const resetFigures = Number.isNaN(resetsMs) ? '' : ` · resets ${clockTimeText(resetsMs, false)}`
-    bars.push(usageBar('5-hour limit', limit.percentUsed, resetFigures))
+    rows.push(usageRow('5h limit', limit.percentUsed, resetFigures))
   }
-  return bars
+  return rows
 }
 
 /** A bar for `percent`, its figures the rounded percentage then `laterFigures`. */
-function usageBar(label: string, percent: number, laterFigures: string): UsageBar {
+function usageRow(label: string, percent: number, laterFigures: string): UsageRow {
   return {
     label,
     fraction: Math.min(1, Math.max(0, percent / PERCENT)),

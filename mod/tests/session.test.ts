@@ -11,7 +11,7 @@ import {
   recordEnd,
   recordStart,
   toolArgumentText,
-  usageBars,
+  usageRows,
 } from '../hooks/session'
 
 const runningCall = (id: string, startedMs = 0): RunningCall => ({
@@ -174,9 +174,9 @@ const usage = (fields: Partial<SessionUsage>): SessionUsage => ({
   ...fields,
 })
 
-describe('usageBars', () => {
+describe('usageRows', () => {
   test('gives the context and five-hour bars with their figures', () => {
-    const bars = usageBars(
+    const rows = usageRows(
       usage({
         context: { tokens: 76_000, window: 200_000, percent: 38 },
         rateLimits: [
@@ -185,49 +185,49 @@ describe('usageBars', () => {
         ],
       }),
     )
-    expect(bars).toEqual([
+    expect(rows).toEqual([
       { label: 'context', fraction: 0.38, figures: '38% · 76k of 200k' },
-      { label: '5-hour limit', fraction: 0.635, figures: `64% · resets ${resetsClock}` },
+      { label: '5h limit', fraction: 0.635, figures: `64% · resets ${resetsClock}` },
     ])
   })
 
   test('a percentage that is not a finite number leaves its bar out', () => {
-    const bars = usageBars(
+    const rows = usageRows(
       usage({
         context: { window: 200_000, percent: Number.NaN },
         rateLimits: [{ kind: 'five_hour', percentUsed: Number.POSITIVE_INFINITY }],
       }),
     )
-    expect(bars).toEqual([])
+    expect(rows).toEqual([])
   })
 
   test('a fresh session with no limit reading has no bars', () => {
-    expect(usageBars(usage({}))).toEqual([])
+    expect(usageRows(usage({}))).toEqual([])
   })
 
   test('a context reading without tokens, or a limit without a reset, shows the percentage alone', () => {
-    const bars = usageBars(
+    const rows = usageRows(
       usage({
         context: { window: 200_000, percent: 5 },
         rateLimits: [{ kind: 'five_hour', percentUsed: 7 }],
       }),
     )
-    expect(bars.map(bar => bar.figures)).toEqual(['5%', '7%'])
+    expect(rows.map(row => row.figures)).toEqual(['5%', '7%'])
   })
 
   test('a reset time that is not a date is left out', () => {
-    const bars = usageBars(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 7, resetsAt: 'soon' }] }))
-    expect(bars.map(bar => bar.figures)).toEqual(['7%'])
+    const rows = usageRows(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 7, resetsAt: 'soon' }] }))
+    expect(rows.map(row => row.figures)).toEqual(['7%'])
   })
 
   test('a window of a million tokens or more is counted in millions', () => {
-    const bars = usageBars(usage({ context: { tokens: 250_000, window: 1_000_000, percent: 25 } }))
-    expect(bars[0]?.figures).toBe('25% · 250k of 1M')
+    const rows = usageRows(usage({ context: { tokens: 250_000, window: 1_000_000, percent: 25 } }))
+    expect(rows[0]?.figures).toBe('25% · 250k of 1M')
   })
 
   test('a limit past 100% fills its bar and no more', () => {
-    const bars = usageBars(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 104 }] }))
-    expect(bars[0]).toEqual({ label: '5-hour limit', fraction: 1, figures: '104%' })
+    const rows = usageRows(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 104 }] }))
+    expect(rows[0]).toEqual({ label: '5h limit', fraction: 1, figures: '104%' })
   })
 })
 

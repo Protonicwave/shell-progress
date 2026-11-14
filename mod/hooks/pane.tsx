@@ -16,7 +16,8 @@ import {
   runKey,
   shownJobs,
 } from './progress'
-import { costText, shortDurationText, usageBars } from './session'
+import type { UsageRow } from './session'
+import { costText, shortDurationText, usageRows } from './session'
 
 export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'This session'
@@ -26,6 +27,12 @@ const MAX_BAR_CELLS = 40
 const MAX_SHOWN_AGENTS = 5
 // A usage bar this full is drawn in HIGH_USAGE_COLOUR.
 const HIGH_USAGE_FRACTION = 0.8
+// From this many body columns each usage bar shares a row with its label and
+// figures; below it the figures would leave the bar too few cells.
+const ONE_ROW_USAGE_MIN_COLUMNS = 40
+// Wide enough for the longest label, `5h limit`.
+const USAGE_LABEL_COLUMNS = 8
+const USAGE_GAP_COLUMNS = 1
 // Columns kept clear to the right of the bar.
 const BAR_GAP_COLUMNS = 2
 const SPINNER_FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
@@ -200,27 +207,61 @@ function recentGroup(ui: PaneElements, calls: readonly EndedCall[]): RenderNode 
   )
 }
 
-/** The context and five-hour bars, each with its figures, and the session's cost. */
+/**
+ * The context and five-hour bars, each on one row with its label and
+ * figures where the pane is wide enough and under them where it is not, then
+ * the session's cost.
+ */
 function usageGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   const { Box, Text } = ui
-  const bars = usageBars(view.usage)
+  const rows = usageRows(view.usage)
   const cost = costText(view.usage)
-  if (bars.length === 0 && cost === undefined) return undefined
-  const cells = barCellsFor(view.bodyColumns)
+  if (rows.length === 0 && cost === undefined) return undefined
+  const drawRow =
+    view.bodyColumns >= ONE_ROW_USAGE_MIN_COLUMNS
+      ? oneUsageRow(ui, oneRowBarCells(view.bodyColumns, rows))
+      : (row: UsageRow) => twoUsageRows(ui, barCellsFor(view.bodyColumns), row)
   return (
     <Box flexDirection="column" marginTop={1}>
-      {bars.map(bar => {
-        const colour = bar.fraction >= HIGH_USAGE_FRACTION ? HIGH_USAGE_COLOUR : BAR_COLOUR
-        return (
-          <Box key={bar.label} flexDirection="column">
-            {spreadRow(ui, <Text dimColor>{bar.label}</Text>, <Text dimColor>{bar.figures}</Text>)}
-            {barRow(ui, bar.fraction, cells, colour)}
-          </Box>
-        )
-      })}
+      {rows.map(drawRow)}
       {cost !== undefined && <Text dimColor>{cost}</Text>}
     </Box>
   )
+}
+
+/** Draws a usage row as label, bar and figures, every row's bar `cells` wide so the bars line up. */
+function oneUsageRow(ui: PaneElements, cells: number) {
+  const { Box, Text } = ui
+  return (row: UsageRow) => (
+    <Box key={row.label} gap={USAGE_GAP_COLUMNS}>
+      <Box width={USAGE_LABEL_COLUMNS} flexShrink={0}>
+        <Text dimColor>{row.label}</Text>
+      </Box>
+      {barRow(ui, row.fraction, cells, usageColour(row))}
+      <Text dimColor>{row.figures}</Text>
+    </Box>
+  )
+}
+
+function twoUsageRows(ui: PaneElements, cells: number, row: UsageRow) {
+  const { Box, Text } = ui
+  return (
+    <Box key={row.label} flexDirection="column">
+      {spreadRow(ui, <Text dimColor>{row.label}</Text>, <Text dimColor>{row.figures}</Text>)}
+      {barRow(ui, row.fraction, cells, usageColour(row))}
+    </Box>
+  )
+}
+
+/** What is left for the bars once the labels, the widest figures and the gaps between them have their room. */
+function oneRowBarCells(bodyColumns: number, rows: readonly UsageRow[]): number {
+  const figuresColumns = Math.max(...rows.map(row => row.figures.length))
+  const free = bodyColumns - USAGE_LABEL_COLUMNS - figuresColumns - 2 * USAGE_GAP_COLUMNS
+  return Math.max(1, Math.min(MAX_BAR_CELLS, free))
+}
+
+function usageColour(row: UsageRow): Color {
+  return row.fraction >= HIGH_USAGE_FRACTION ? HIGH_USAGE_COLOUR : BAR_COLOUR
 }
 
 /** The jobs: unfinished first, then the finished ones under their own label. */
