@@ -144,7 +144,11 @@ task and whether it is running, waiting, completed or failed. Past five, the
 rest are counted. Pressing an agent's task shows its transcript in the main
 view, as the tasks list does; a toast says why when it cannot, for example
 for a teammate that runs in a terminal pane of its own. An agent leaves the
-list when Claude Code stops tracking it, shortly after it ends.
+list when Claude Code stops tracking it, shortly after it ends. Once an agent
+that Claude waited on has finished, a dim row under it gives its time and
+tokens, such as `0m 40s · 65k tokens`, from the Agent tool's result. An agent
+started in the background has no such row: the tool answers when it starts,
+before it has used either.
 
 At the foot of the pane, a bar shows how full the context window is, such as
 `38% · 76k of 200k`, and another how much of the five-hour usage limit is used

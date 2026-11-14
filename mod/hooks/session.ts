@@ -1,6 +1,6 @@
-import type { AgentInfo, SessionRateLimit, SessionUsage } from 'claude-code'
+import type { AgentInfo, SessionRateLimit, SessionUsage, ToolResultOf } from 'claude-code'
 
-import type { EndedCall, LimitReading, ListedAgent, RunningCall, ToolCalls, TurnContext } from '../types'
+import type { AgentCost, EndedCall, LimitReading, ListedAgent, RunningCall, ToolCalls, TurnContext } from '../types'
 import { MS_PER_SECOND, SECONDS_PER_MINUTE, clockTimeText, durationText } from './progress'
 
 /** How many ended calls the pane lists, newest first. */
@@ -8,6 +8,9 @@ const RECENT_CALL_COUNT = 3
 // Parallel calls are few; past this the oldest is dropped, as the end of the
 // turn would drop it, so a call whose end is never heard cannot grow the list.
 const MAX_RUNNING_CALLS = 20
+// The pane draws at most five agents; past this the oldest cost is dropped,
+// which only leaves its agent's row without one.
+const MAX_AGENT_COSTS = 50
 
 export const NO_TOOL_CALLS: ToolCalls = { running: [], recent: [] }
 
@@ -80,6 +83,31 @@ export function mergeAgents(
     ...[...current.values()].filter(agent => !seenIds.has(agent.id)),
   ]
   return isSameAgents(previous, merged) ? previous : merged
+}
+
+/**
+ * A completed agent's time and tokens; `undefined` for a background launch,
+ * whose result comes before it has either, for a record that carries neither,
+ * or for figures that are not finite.
+ */
+export function agentCostOf(record: ToolResultOf<'Agent'> | undefined): AgentCost | undefined {
+  if (record === undefined || !('status' in record) || record.status !== 'completed') return undefined
+  const { agentId, totalDurationMs, totalTokens } = record
+  if (!Number.isFinite(totalDurationMs) || !Number.isFinite(totalTokens)) return undefined
+  return { id: agentId, durationMs: totalDurationMs, tokens: totalTokens }
+}
+
+/** Adds `cost` as the newest, in place of any earlier one for the same agent. */
+export function recordAgentCost(costs: readonly AgentCost[], cost: AgentCost): readonly AgentCost[] {
+  return [...costs.filter(one => one.id !== cost.id), cost].slice(-MAX_AGENT_COSTS)
+}
+
+/** `0m 40s · 65k tokens`. */
+export function agentCostText(cost: AgentCost): string {
+  // Under 500 tokens would read `0k`.
+  const isUnderThousands = Math.round(cost.tokens / TOKENS_PER_THOUSAND) === 0
+  const tokens = isUnderThousands ? String(Math.round(cost.tokens)) : tokensText(cost.tokens)
+  return `${durationText(cost.durationMs / MS_PER_SECOND)} · ${tokens} tokens`
 }
 
 function listedAgent(agent: AgentInfo): ListedAgent {

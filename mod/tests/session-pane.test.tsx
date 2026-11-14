@@ -2,7 +2,16 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { AgentInfo, AgentStatus, On, ToolCallResult } from 'claude-code'
 
-import { PANE, POLL_MS, START_MS, fakeWorld, mountPane, runningLine, startSession } from './fake-world'
+import {
+  PANE,
+  POLL_MS,
+  START_MS,
+  completedAgentRecord,
+  fakeWorld,
+  mountPane,
+  runningLine,
+  startSession,
+} from './fake-world'
 
 const TURN_ID = 'turn-1'
 
@@ -390,6 +399,56 @@ test('Agents lists the agents newest first with their status, and drops one the 
   await clock.advance(POLL_MS)
   expect(await ui.find({ type: 'Button', text: 'review migrations' })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /^failed$/ }))?.props['color']).toBe('error')
+  await ui.unmount()
+})
+
+test("a finished agent's row shows its time and tokens, whichever loop started it", async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  world.agents = [agent('a1', 'review migrations', 'completed'), agent('a2', 'find callers', 'completed')]
+  const records = new Map([
+    ['review migrations', completedAgentRecord('a1', 40_000, 65_200)],
+    ['find callers', completedAgentRecord('a2', 75_000, 9_800)],
+  ])
+  on('tool.call', { tool: 'Agent' }, (_, e) => ({ result: records.get(e.description) }))
+  await startSession($)
+
+  const call = { tool: 'Agent', prompt: 'look', subagent_type: 'Explore' } as const
+  const answered = await $.tool.call({ ...call, description: 'review migrations' })
+  expect(answered).toMatchObject({ result: { agentId: 'a1', totalTokens: 65_200 } })
+  await $.tool.call({ ...call, description: 'find callers', agentId: 'a1' })
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: '0m 40s · 65k tokens' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '1m 15s · 10k tokens' })).toBeDefined()
+  await ui.unmount()
+})
+
+test("a background agent's launch and a failed agent call record no cost", async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  world.agents = [agent('a1', 'review migrations'), agent('a2', 'find callers')]
+  on('tool.call', { tool: 'Agent' }, (_, e) =>
+    e.description === 'review migrations'
+      ? {
+          result: {
+            status: 'async_launched',
+            agentId: 'a1',
+            description: e.description,
+            prompt: e.prompt,
+            outputFile: '/tmp/a1.txt',
+          },
+        }
+      : { result: completedAgentRecord('a2', 40_000, 65_200), isError: true, text: 'agent failed' },
+  )
+  await startSession($)
+
+  const call = { tool: 'Agent', prompt: 'look', subagent_type: 'Explore' } as const
+  await $.tool.call({ ...call, description: 'review migrations' })
+  await $.tool.call({ ...call, description: 'find callers' })
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: /tokens$/ })).toBeUndefined()
   await ui.unmount()
 })
 

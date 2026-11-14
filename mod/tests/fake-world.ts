@@ -1,6 +1,6 @@
 import { expect, mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { AgentInfo, On, SessionUsage, UiNotifyResult, UiOpenResult, UiPane, UiViewResult } from 'claude-code'
+import type { AgentInfo, BuiltinToolResults, On, SessionUsage, UiNotifyResult, UiOpenResult, UiPane, UiViewResult } from 'claude-code'
 
 const DIR = '/work/progress'
 // The engine hands paths on in the platform's form, a drive letter and
@@ -156,3 +156,23 @@ export async function startSession($: Engine): Promise<void> {
 
 export const runningLine = (step: number, total: number, label = '') =>
   `${STARTED_SEC} ${step} ${total}${label === '' ? '' : ` ${label}`}\n`
+
+/** The Agent tool's record of a foreground agent that finished. */
+export const completedAgentRecord = (agentId: string, totalDurationMs: number, totalTokens: number): BuiltinToolResults['Agent'] => ({
+  agentId,
+  status: 'completed',
+  prompt: 'find the callers',
+  content: [{ type: 'text', text: 'done' }],
+  totalToolUseCount: 4,
+  totalDurationMs,
+  totalTokens,
+  usage: {
+    input_tokens: 10,
+    output_tokens: 20,
+    cache_creation_input_tokens: null,
+    cache_read_input_tokens: null,
+    server_tool_use: null,
+    service_tier: null,
+    cache_creation: null,
+  },
+})

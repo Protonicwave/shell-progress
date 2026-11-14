@@ -1,16 +1,19 @@
 import { describe, expect, test } from 'claude-code/testing'
-import type { AgentInfo, AgentStatus, SessionUsage } from 'claude-code'
+import type { AgentInfo, AgentStatus, BuiltinToolResults, SessionUsage } from 'claude-code'
 
-import type { EndedCall, LimitReading, RunningCall, ToolCalls } from '../types'
+import type { AgentCost, EndedCall, LimitReading, RunningCall, ToolCalls } from '../types'
 import {
   NO_TOOL_CALLS,
   NO_TURN_CONTEXT,
+  agentCostOf,
+  agentCostText,
   costText,
   endTurnContext,
   limitForecast,
   shortDurationText,
   endTurnCalls,
   mergeAgents,
+  recordAgentCost,
   recordEnd,
   recordLimitReading,
   recordStart,
@@ -19,6 +22,7 @@ import {
   usageRows,
   usageHintText,
 } from '../hooks/session'
+import { completedAgentRecord } from './fake-world'
 
 const runningCall = (id: string, startedMs = 0): RunningCall => ({
   id,
@@ -433,4 +437,56 @@ describe('usageHintText', () => {
     })
     expect(usageHintText(broken)).toBeUndefined()
   })
+})
+
+const cost = (id: string, durationMs = 40_000, tokens = 65_200): AgentCost => ({ id, durationMs, tokens })
+
+describe('agentCostOf', () => {
+  test("records a completed agent's time and tokens", () => {
+    expect(agentCostOf(completedAgentRecord('a1', 40_000, 65_200))).toEqual(cost('a1'))
+  })
+
+  test('records nothing for a background launch, which has neither yet', () => {
+    const launched: BuiltinToolResults['Agent'] = {
+      status: 'async_launched',
+      agentId: 'a1',
+      description: 'find callers',
+      prompt: 'find the callers',
+      outputFile: '/tmp/a1.txt',
+    }
+    expect(agentCostOf(launched)).toBeUndefined()
+  })
+
+  test('records nothing for a missing record or figures that are not finite', () => {
+    expect(agentCostOf(undefined)).toBeUndefined()
+    expect(agentCostOf(completedAgentRecord('a1', Number.NaN, 65_200))).toBeUndefined()
+    expect(agentCostOf(completedAgentRecord('a1', 40_000, Number.POSITIVE_INFINITY))).toBeUndefined()
+  })
+})
+
+describe('recordAgentCost', () => {
+  test("replaces an agent's earlier cost and keeps the newest last", () => {
+    const costs = recordAgentCost([cost('a1'), cost('a2')], cost('a1', 90_000, 120_000))
+    expect(costs).toEqual([cost('a2'), cost('a1', 90_000, 120_000)])
+  })
+
+  test('keeps the newest 50', () => {
+    let costs: readonly AgentCost[] = []
+    for (let index = 0; index < 51; index += 1) costs = recordAgentCost(costs, cost(`a${index}`))
+    expect(costs).toHaveLength(50)
+    expect(costs[0]?.id).toBe('a1')
+    expect(costs.at(-1)?.id).toBe('a50')
+  })
+})
+
+describe('agentCostText', () => {
+  for (const [durationMs, tokens, text] of [
+    [40_000, 65_200, '0m 40s · 65k tokens'],
+    [3_725_000, 1_250_000, '1h 02m · 1.3M tokens'],
+    [900, 420, '0m 00s · 420 tokens'],
+  ] as const) {
+    test(`shows ${durationMs} ms and ${tokens} tokens as ${text}`, () => {
+      expect(agentCostText(cost('a1', durationMs, tokens))).toBe(text)
+    })
+  }
 })

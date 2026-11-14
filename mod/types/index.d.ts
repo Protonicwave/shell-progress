@@ -71,6 +71,14 @@ export type ListedAgent = {
   readonly status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed'
 }
 
+/** What a finished agent took, from the Agent tool's result. */
+export type AgentCost = {
+  /** The agent's id, the same in the Agent tool's result and `$.agent.list()`. */
+  readonly id: string
+  readonly durationMs: number
+  readonly tokens: number
+}
+
 /** The main conversation's context at the start of the running turn, and what the last finished turn added. */
 export type TurnContext = {
   /** Tokens when the running turn started; `null` when no turn runs or none had been counted yet. */
@@ -114,6 +122,8 @@ declare module 'claude-code' {
       limitReadings: Shaped<readonly LimitReading[]>
       /** In the order the mod first saw them, oldest first. */
       agents: Shaped<readonly ListedAgent[]>
+      /** Oldest first. */
+      agentCosts: Shaped<readonly AgentCost[]>
       /** The usage figures the prompt hint ends with, or `null` while it shows none. */
       hintUsage: string | null
     }

@@ -1,6 +1,7 @@
 import type { Color, Elements, RenderNode, SessionUsage } from 'claude-code'
 
 import type {
+  AgentCost,
   EndedCall,
   Job,
   LimitReading,
@@ -26,7 +27,7 @@ import {
   shownJobs,
 } from './progress'
 import type { UsageRow } from './session'
-import { costText, shortDurationText, usageRows } from './session'
+import { agentCostText, costText, shortDurationText, usageRows } from './session'
 
 export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'This session'
@@ -94,6 +95,8 @@ type PaneView = {
   readonly limitReadings: readonly LimitReading[]
   /** Oldest first. */
   readonly agents: readonly ListedAgent[]
+  /** What each finished agent took, oldest first. */
+  readonly agentCosts: readonly AgentCost[]
 }
 
 /**
@@ -154,6 +157,7 @@ function agentsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   const shown = view.agents.slice(-MAX_SHOWN_AGENTS).reverse()
   const moreCount = view.agents.length - shown.length
   const more = moreCount > 0 ? <Text dimColor>{moreCount} more</Text> : undefined
+  const costs = new Map(view.agentCosts.map(cost => [cost.id, cost]))
   return (
     <Box flexDirection="column" marginTop={1}>
       {spreadRow(ui, <Text dimColor>Agents</Text>, more)}
@@ -173,7 +177,13 @@ function agentsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
           ) : (
             <Text color={colour}>{agent.status}</Text>
           )
-        return <Box key={agent.id}>{nameRow(ui, button, status)}</Box>
+        const cost = costs.get(agent.id)
+        return (
+          <Box key={agent.id} flexDirection="column">
+            {nameRow(ui, button, status)}
+            {cost !== undefined && <Text dimColor>{agentCostText(cost)}</Text>}
+          </Box>
+        )
       })}
     </Box>
   )

@@ -20,9 +20,11 @@ import {
 import {
   NO_TOOL_CALLS,
   NO_TURN_CONTEXT,
+  agentCostOf,
   endTurnCalls,
   endTurnContext,
   mergeAgents,
+  recordAgentCost,
   recordEnd,
   recordLimitReading,
   recordStart,
@@ -75,6 +77,9 @@ const limitReadings = atom({ plugin: 'shell-progress', key: 'limitReadings' } as
   shape: 'limit-readings-1',
 })
 const agents = atom({ plugin: 'shell-progress', key: 'agents' } as const, [], { shape: 'agents-1' })
+const agentCosts = atom({ plugin: 'shell-progress', key: 'agentCosts' } as const, [], {
+  shape: 'agent-costs-1',
+})
 // Written only when it changes, so the prompt hint is drawn again once per
 // change rather than once a poll.
 const hintUsage = atom({ plugin: 'shell-progress', key: 'hintUsage' } as const, null)
@@ -117,6 +122,7 @@ export const register: Register = (on, options) => {
       context,
       readings,
       agentList,
+      costs,
       nowMs,
       usage,
     ] = await Promise.all([
@@ -130,6 +136,7 @@ export const register: Register = (on, options) => {
         read($, turnContext),
         read($, limitReadings),
         read($, agents),
+        read($, agentCosts),
         $.clock.now(),
         $.session.usage(),
       ])
@@ -149,6 +156,7 @@ export const register: Register = (on, options) => {
       turnContext: context,
       limitReadings: readings,
       agents: agentList,
+      agentCosts: costs,
     })
   })
 
@@ -212,6 +220,18 @@ function followSession(on: On): void {
       const endedMs = await $.clock.now()
       await update($, toolCalls, calls => recordEnd(calls, { ...call, endedMs, hasFailed }))
     }
+  })
+
+  // Any loop's, unlike the hooks above, so an agent a subagent started shows
+  // its cost in the agents list too. The result passes through unchanged.
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    // The matcher already selects Agent; the check types the result.
+    if (e.tool !== 'Agent') return next(e)
+    const result = await next(e)
+    if (result.deny !== undefined || result.isError === true) return result
+    const cost = agentCostOf(result.result)
+    if (cost !== undefined) await update($, agentCosts, costs => recordAgentCost(costs, cost))
+    return result
   })
 }
 
