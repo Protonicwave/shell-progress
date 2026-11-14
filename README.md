@@ -163,6 +163,11 @@ least 5 minutes older says the limit fills before it resets, its figures give
 that time in the warning colour instead of the reset, such as
 `82% · full by 14:39`.
 
+While the pane is closed, waiting for a wider terminal, or behind another
+pane, the mod's status line under the prompt carries the same figures, after
+any running jobs: `ctx 38% · 5h 63% · $1.84`. They leave the status line
+when the pane comes back into view, so each figure is on screen once.
+
 Under Jobs, the pane lists each running job with a bar, its step and total, its label and
 the time since it started. From its third step a job also shows about how long
 it has left, from its average time per step so far, until it reaches its last

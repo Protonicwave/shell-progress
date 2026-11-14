@@ -28,6 +28,7 @@ import {
   recordStart,
   startTurnContext,
   toolArgumentText,
+  usageStatusText,
 } from './session'
 
 const COMMAND_NAME = 'progress'
@@ -39,6 +40,9 @@ const DISMISSED_STORE_KEY = 'dismissedJobs'
 const MAX_DISMISSED_JOBS = 200
 // A width the person dragged the pane to wins over `columns`.
 const PANE_REQUEST = { id: PANE_ID, title: PANE_TITLE, columns: PANE_COLUMNS } as const
+// Between the jobs and the usage figures on the status line, whose own parts
+// are joined by ` · `.
+const STATUS_GROUP_SEPARATOR = '   '
 
 // Change the tag when Job's fields change: it declines what an earlier
 // version stored, which outlives a reload.
@@ -311,12 +315,17 @@ function startPolling(
   const agentsFailure = failureLog($, 'cannot list agents')
   // Separate, so a hung agent list cannot hold up the jobs, or the reverse.
   const tickJobs = unlessUnsettled($, `a poll of ${dir}`, () =>
-    pollOnce($, dir, stallMs, notifySeconds).then(summary => {
-      jobsFailure.clear()
-      if (summary === shownStatus) return
-      shownStatus = summary
-      $.ui.status(summary)
-    }, jobsFailure.record),
+    Promise.all([pollOnce($, dir, stallMs, notifySeconds), hiddenPaneUsageText($)]).then(
+      ([jobsText, usageText]) => {
+        jobsFailure.clear()
+        const groups = [jobsText, usageText].filter(group => group !== undefined)
+        const status = groups.length === 0 ? undefined : groups.join(STATUS_GROUP_SEPARATOR)
+        if (status === shownStatus) return
+        shownStatus = status
+        $.ui.status(status)
+      },
+      jobsFailure.record,
+    ),
   )
   // On a failure the stored agents stay, so the pane keeps the last list.
   const tickAgents = unlessUnsettled($, 'a listing of agents', () =>
@@ -405,6 +414,16 @@ async function pollOnce(
   // row does not move, so it alone does not keep the pane redrawing.
   if (isAnyLive) $.ui.invalidate('ui.render')
   return statusSummary(shown, nowMs, stallMs)
+}
+
+/**
+ * The usage figures, unless the pane is placed and in front, where its bars
+ * already show them.
+ */
+async function hiddenPaneUsageText($: EngineInterface): Promise<string | undefined> {
+  const [panes, usage] = await Promise.all([$.ui.panes(), $.session.usage()])
+  const isPaneInView = panes.some(pane => pane.id === PANE_ID && pane.isPlaced && pane.isShown)
+  return isPaneInView ? undefined : usageStatusText(usage)
 }
 
 /** One toast for the jobs that finished, and one notification for those worth one. */

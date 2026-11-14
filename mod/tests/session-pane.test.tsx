@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { AgentInfo, AgentStatus, ToolCallResult } from 'claude-code'
 
-import { PANE, POLL_MS, START_MS, fakeWorld, mountPane, startSession } from './fake-world'
+import { PANE, POLL_MS, START_MS, fakeWorld, mountPane, runningLine, startSession } from './fake-world'
 
 const TURN_ID = 'turn-1'
 
@@ -271,6 +271,36 @@ test('a figure the session lacks leaves its bar or line out', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: '5h limit' })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /^session cost/ }))?.text).toBe('session cost $0.00')
   await ui.unmount()
+})
+
+const HIGH_USAGE_STATUS = 'ctx 85% · 5h 40% · $1.84'
+
+test('the status line carries the usage figures only while the pane is not in view', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  world.usage = HIGH_USAGE
+  await startSession($)
+  const pane = { id: PANE.requestId, title: PANE.props.title, isFocused: false }
+
+  await clock.advance(POLL_MS)
+  world.panes = [{ ...pane, isShown: true, isPlaced: true }]
+  await clock.advance(POLL_MS)
+  world.panes = [{ ...pane, isShown: false, isPlaced: true }]
+  await clock.advance(POLL_MS)
+  world.panes = [{ ...pane, isShown: true, isPlaced: true }]
+  await clock.advance(POLL_MS)
+  world.panes = [{ ...pane, isShown: false, isPlaced: false }]
+  await clock.advance(POLL_MS)
+  expect(world.statuses).toEqual([HIGH_USAGE_STATUS, undefined, HIGH_USAGE_STATUS, undefined, HIGH_USAGE_STATUS])
+})
+
+test('the usage figures follow the running jobs on the status line', async ($, on) => {
+  const files = new Map([['build.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS }]])
+  const { world, clock } = fakeWorld(on, files)
+  world.usage = HIGH_USAGE
+  await startSession($)
+
+  await clock.advance(POLL_MS)
+  expect(world.statuses).toEqual([`build 50%   ${HIGH_USAGE_STATUS}`])
 })
 
 const agent = (id: string, description: string, status: AgentStatus = 'running'): AgentInfo => ({

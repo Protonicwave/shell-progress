@@ -17,6 +17,7 @@ import {
   startTurnContext,
   toolArgumentText,
   usageRows,
+  usageStatusText,
 } from '../hooks/session'
 
 const runningCall = (id: string, startedMs = 0): RunningCall => ({
@@ -403,5 +404,33 @@ describe('costText', () => {
 
   test('is undefined where the host keeps no cost', () => {
     expect(costText(usage({}))).toBeUndefined()
+  })
+})
+
+describe('usageStatusText', () => {
+  test('gives the context, the five-hour limit and the cost', () => {
+    const full = usage({
+      context: { tokens: 76_000, window: 200_000, percent: 37.6 },
+      rateLimits: [
+        { kind: 'seven_day', percentUsed: 12 },
+        { kind: 'five_hour', percentUsed: 63.2 },
+      ],
+      cost: { usd: 1.8361 },
+    })
+    expect(usageStatusText(full)).toBe('ctx 38% · 5h 63% · $1.84')
+  })
+
+  test('leaves out each figure the session lacks', () => {
+    expect(usageStatusText(usage({ cost: { usd: 0.5 } }))).toBe('$0.50')
+    const limitOnly = usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 104 }] })
+    expect(usageStatusText(limitOnly)).toBe('5h 104%')
+  })
+
+  test('leaves out a percentage that is not a finite number', () => {
+    const broken = usage({
+      context: { window: 200_000, percent: Number.NaN },
+      rateLimits: [{ kind: 'five_hour', percentUsed: Number.POSITIVE_INFINITY }],
+    })
+    expect(usageStatusText(broken)).toBeUndefined()
   })
 })

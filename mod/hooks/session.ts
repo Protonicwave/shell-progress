@@ -154,13 +154,14 @@ export function usageRows(
   nowMs: number,
 ): readonly UsageRow[] {
   const rows: UsageRow[] = []
-  const { tokens, window, percent } = usage.context
-  if (percent !== undefined && Number.isFinite(percent)) {
+  const { tokens, window } = usage.context
+  const percent = contextPercent(usage)
+  if (percent !== undefined) {
     const tokenFigures = tokens === undefined ? '' : ` · ${tokensText(tokens)} of ${tokensText(window)}`
     rows.push(usageRow('context', percent, tokenFigures + addedTokensText(lastAddedTokens)))
   }
-  const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
-  if (limit !== undefined && Number.isFinite(limit.percentUsed)) {
+  const limit = fiveHourLimit(usage)
+  if (limit !== undefined) {
     const resetsMs = resetsMsOf(limit)
     if (resetsMs === undefined) {
       rows.push(usageRow('5h limit', limit.percentUsed, ''))
@@ -176,6 +177,18 @@ export function usageRows(
   return rows
 }
 
+/** The context window's percentage, when the session has a finite one. */
+function contextPercent(usage: SessionUsage): number | undefined {
+  const { percent } = usage.context
+  return percent !== undefined && Number.isFinite(percent) ? percent : undefined
+}
+
+/** The five-hour limit, when the session has one with a finite percentage. */
+function fiveHourLimit(usage: SessionUsage): SessionRateLimit | undefined {
+  const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
+  return limit !== undefined && Number.isFinite(limit.percentUsed) ? limit : undefined
+}
+
 function resetsMsOf(limit: SessionRateLimit): number | undefined {
   const resetsMs = limit.resetsAt === undefined ? Number.NaN : Date.parse(limit.resetsAt)
   return Number.isNaN(resetsMs) ? undefined : resetsMs
@@ -187,8 +200,8 @@ export function recordLimitReading(
   usage: SessionUsage,
   nowMs: number,
 ): readonly LimitReading[] {
-  const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
-  if (limit === undefined || !Number.isFinite(limit.percentUsed)) return readings
+  const limit = fiveHourLimit(usage)
+  if (limit === undefined) return readings
   const resetsMs = resetsMsOf(limit)
   if (resetsMs === undefined) return readings
   return [...readings, { atMs: nowMs, percentUsed: limit.percentUsed, resetsMs }].slice(-MAX_LIMIT_READINGS)
@@ -241,5 +254,24 @@ function tokensText(tokens: number): string {
 
 /** `session cost $1.84`, or `undefined` where the host keeps no cost. */
 export function costText(usage: SessionUsage): string | undefined {
-  return usage.cost === undefined ? undefined : `session cost $${usage.cost.usd.toFixed(2)}`
+  return usage.cost === undefined ? undefined : `session cost ${dollarsText(usage.cost.usd)}`
+}
+
+function dollarsText(usd: number): string {
+  return `$${usd.toFixed(2)}`
+}
+
+/**
+ * `ctx 38% · 5h 63% · $1.84`, for the status line while the pane is not in
+ * view: each figure the session has, or `undefined` with none.
+ */
+export function usageStatusText(usage: SessionUsage): string | undefined {
+  const percent = contextPercent(usage)
+  const limit = fiveHourLimit(usage)
+  const figures = [
+    ...(percent === undefined ? [] : [`ctx ${Math.round(percent)}%`]),
+    ...(limit === undefined ? [] : [`5h ${Math.round(limit.percentUsed)}%`]),
+    ...(usage.cost === undefined ? [] : [dollarsText(usage.cost.usd)]),
+  ]
+  return figures.length === 0 ? undefined : figures.join(' · ')
 }
