@@ -132,34 +132,17 @@ test('a job stalls once its file is unchanged for stallMinutes', { options: { st
   expect(world.statuses).toEqual(['build 50%', 'build stalled'])
 })
 
-test('the pane opens when the first running job appears, and only then', async ($, on) => {
+test('the pane opens at session start with no jobs, and not again when the module reloads', async ($, on) => {
   const files = new Map<string, FakeFile>()
   const { world, clock } = fakeWorld(on, files)
   await startSession($)
-
-  await clock.advance(POLL_MS)
-  expect(world.opens).toEqual([])
+  expect(world.opens).toEqual(['shell-progress'])
 
   files.set('build.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS })
   await clock.advance(POLL_MS)
-  expect(world.opens).toEqual(['shell-progress'])
-
-  files.set('build.sh-10.txt', { text: `${STARTED_SEC} done 0 ${STARTED_SEC + 1}\n`, mtimeMs: START_MS + 1 })
-  files.set('test.sh-11.txt', { text: runningLine(1, 2), mtimeMs: START_MS + 1 })
-  await clock.advance(POLL_MS * 2)
-  expect(world.opens).toEqual(['shell-progress'])
-})
-
-test('a stalled job left from earlier does not open the pane', { options: { stallMinutes: 1 } }, async ($, on) => {
-  const files = new Map<string, FakeFile>([
-    ['old.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS - 120_000 }],
-  ])
-  const { world, clock } = fakeWorld(on, files)
+  // A reload runs session.start again, with the session's state kept.
   await startSession($)
-
-  await clock.advance(POLL_MS)
-  expect(world.statuses).toEqual(['old stalled'])
-  expect(world.opens).toEqual([])
+  expect(world.opens).toEqual(['shell-progress'])
 })
 
 test('a changed file is read on the next poll however many others keep changing', async ($, on) => {

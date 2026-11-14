@@ -35,6 +35,38 @@ export type Job = {
   readonly lastLabel: string
 }
 
+/** A tool call of the main conversation that has started and not ended. */
+export type RunningCall = {
+  /** The call's `tool_use_id`. */
+  readonly id: string
+  readonly tool: string
+  /** The one argument worth showing, or empty. */
+  readonly argument: string
+  readonly startedMs: number
+}
+
+export type EndedCall = RunningCall & {
+  readonly endedMs: number
+  /** True when the tool reported an error, the call was denied, or it rejected. */
+  readonly hasFailed: boolean
+}
+
+export type ToolCalls = {
+  /** Oldest first, so the last is the call shown as running now. */
+  readonly running: readonly RunningCall[]
+  /** Newest first. */
+  readonly recent: readonly EndedCall[]
+}
+
+/** Whether the main conversation's turn is running, and how long the last one took. */
+export type SessionTurn =
+  | { readonly kind: 'running'; readonly startedMs: number }
+  | {
+      readonly kind: 'waiting'
+      /** `null` before the first turn ends. */
+      readonly lastDurationMs: number | null
+    }
+
 declare module 'claude-code' {
   interface PluginState {
     'shell-progress': {
@@ -46,6 +78,8 @@ declare module 'claude-code' {
       dismissedJobs: readonly string[]
       /** The run keys of the failed jobs Claude has been asked about in this session. */
       askedJobs: readonly string[]
+      toolCalls: Shaped<ToolCalls>
+      sessionTurn: Shaped<SessionTurn>
     }
   }
 }

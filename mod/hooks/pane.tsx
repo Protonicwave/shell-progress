@@ -1,6 +1,6 @@
 import type { Color, Elements, RenderNode } from 'claude-code'
 
-import type { Job } from '../types'
+import type { EndedCall, Job, RunningCall, SessionTurn, ToolCalls } from '../types'
 import { POLL_INTERVAL_MS } from './poll'
 import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
 import {
@@ -14,16 +14,17 @@ import {
   runKey,
   shownJobs,
 } from './progress'
+import { shortDurationText } from './session'
 
 export const PANE_ID = 'shell-progress'
-export const PANE_TITLE = 'Background jobs'
+export const PANE_TITLE = 'This session'
 
 const MAX_BAR_CELLS = 40
 // Columns kept clear to the right of the bar.
 const BAR_GAP_COLUMNS = 2
 const SPINNER_FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-// The pane is redrawn on each poll while a job runs, so the spinner turns
-// one frame per poll.
+// The pane is redrawn on each poll while a job or a turn runs, so the
+// spinner turns one frame per poll.
 const SPINNER_FRAME_MS = POLL_INTERVAL_MS
 
 const BAR_COLOUR: Color = 'claude'
@@ -57,27 +58,97 @@ type PaneView = {
   readonly sessionStartedMs: number
   readonly stallMs: number
   readonly actions: JobActions
+  readonly toolCalls: ToolCalls
+  readonly turn: SessionTurn
 }
 
-/** Draws the jobs as `docs/mockup.html` shows them: unfinished first, then the finished group. */
+/**
+ * Draws the session as `docs/mockup.html` shows it: the call running now, the
+ * jobs, then the last calls. A group with nothing in it is left out.
+ */
 export function drawPane(ui: PaneElements, view: PaneView) {
+  const { Box, Text } = ui
+  const turnTime =
+    view.turn.kind === 'running' ? (
+      <Text dimColor>turn {shortDurationText(view.nowMs - view.turn.startedMs)}</Text>
+    ) : undefined
+  return (
+    <Box flexDirection="column">
+      {spreadRow(ui, <Text bold>{PANE_TITLE}</Text>, turnTime)}
+      <Box marginTop={1}>{nowRow(ui, view)}</Box>
+      {jobsGroup(ui, view)}
+      {recentGroup(ui, view.toolCalls.recent)}
+    </Box>
+  )
+}
+
+/** The call running now, else what the turn is doing. */
+function nowRow(ui: PaneElements, view: PaneView): RenderNode {
+  const { Text } = ui
+  const call = view.toolCalls.running.at(-1)
+  if (call !== undefined) return runningCallRow(ui, view.nowMs, call)
+  if (view.turn.kind === 'running') {
+    return <Text><Text color={BAR_COLOUR}>{spinnerFrame(view.nowMs)}</Text> Thinking</Text>
+  }
+  const last = view.turn.lastDurationMs
+  return (
+    <Text dimColor>
+      Waiting for you{last === null ? '' : ` · last turn took ${shortDurationText(last)}`}
+    </Text>
+  )
+}
+
+function runningCallRow(ui: PaneElements, nowMs: number, call: RunningCall): RenderNode {
+  const { Text } = ui
+  return spreadRow(
+    ui,
+    <Text>
+      <Text color={BAR_COLOUR}>{spinnerFrame(nowMs)}</Text> <Text bold>{call.tool}</Text>{' '}
+      <Text dimColor>{call.argument}</Text>
+    </Text>,
+    <Text dimColor>{shortDurationText(nowMs - call.startedMs)}</Text>,
+  )
+}
+
+/** The last calls, newest first, each with how long it took. */
+function recentGroup(ui: PaneElements, calls: readonly EndedCall[]): RenderNode | undefined {
+  const { Box, Text } = ui
+  if (calls.length === 0) return undefined
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text dimColor>Recent</Text>
+      {calls.map(call => {
+        const took = shortDurationText(call.endedMs - call.startedMs)
+        const time = call.hasFailed
+          ? <Text color={FAILED_COLOUR}>failed after {took}</Text>
+          : <Text dimColor>{took}</Text>
+        return (
+          <Box key={call.id}>
+            {spreadRow(ui, <Text>{call.tool} <Text dimColor>{call.argument}</Text></Text>, time)}
+          </Box>
+        )
+      })}
+    </Box>
+  )
+}
+
+/** The jobs: unfinished first, then the finished ones under their own label. */
+function jobsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   const { Box, Text } = ui
   const { unfinished, finished, hiddenCount } = shownJobs(
     view.jobs,
     view.sessionStartedMs,
     view.dismissedJobs,
   )
+  if (unfinished.length === 0 && finished.length === 0 && hiddenCount === 0) return undefined
   const runningCount = unfinished.filter(
     job => job.line !== null && !isStalled(job, view.nowMs, view.stallMs),
   ).length
   const count = countText(runningCount, unfinished.length, finished.length)
 
   return (
-    <Box flexDirection="column">
-      {spreadRow(ui, <Text bold>{PANE_TITLE}</Text>, headerRight(ui, view, count, hiddenCount))}
-      {unfinished.length === 0 && finished.length === 0 && hiddenCount === 0 && (
-        <Text dimColor>No jobs yet. A script that sources the helpers shows here.</Text>
-      )}
+    <Box flexDirection="column" marginTop={1}>
+      {spreadRow(ui, <Text dimColor>Jobs</Text>, jobsCount(ui, view, count, hiddenCount))}
       {unfinished.map(job => (
         <Box key={job.file} flexDirection="column" marginTop={1}>
           {unfinishedRows(ui, view, job)}
@@ -109,8 +180,8 @@ function countText(
   return unfinishedCount === 0 && finishedCount > 0 ? 'all finished' : undefined
 }
 
-/** The header's right side: the count, then a button that shows the hidden jobs again. */
-function headerRight(
+/** The jobs label's right side: the count, then a button that shows the hidden jobs again. */
+function jobsCount(
   { Box, Button, Text }: PaneElements,
   view: PaneView,
   count: string | undefined,

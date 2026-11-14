@@ -1,7 +1,8 @@
 # shell-progress
 
 Helpers that let a script report its progress, and a Claude Code mod that
-draws a bar per job in a pane beside the chat. There is one helper for Bash and
+draws a bar per job in a pane beside the chat, under the tool Claude is
+running. There is one helper for Bash and
 one for Windows PowerShell 5.1; both write the file format below, and the mod
 reads it.
 
@@ -126,7 +127,15 @@ same directory the helpers write to: `$CLAUDE_PROGRESS_DIR` when the session
 has it set, otherwise `.claude/progress` under the folder the session started
 in.
 
-The pane lists each running job with a bar, its step and total, its label and
+The pane is titled This session. Its first line shows the tool call Claude is
+running, such as `Bash npm test`, with how long it has run, or `Thinking`
+between calls, or once the turn ends, `Waiting for you` and how long the turn
+took. While a turn runs the header shows its time. Below come the jobs, then
+Recent: the last three calls, newest first, each with how long it took, and in
+red when it failed. Only the main conversation's calls are shown, not a
+subagent's. A group with nothing in it is not drawn.
+
+Under Jobs, the pane lists each running job with a bar, its step and total, its label and
 the time since it started. From its third step a job also shows about how long
 it has left, from its average time per step so far. A job with no step count
 shows a spinner instead of a bar. A running job whose file has not changed for
@@ -140,7 +149,7 @@ Pressing a job's name expands its row to the path of its progress file, its
 process id, the time it started and, once finished, its exit code. Pressing it
 again, or another job's name, collapses it. An expanded stalled or finished
 job has a Dismiss button, which hides the job from the pane in this session and
-later ones. The pane's header then counts the hidden jobs, and pressing the
+later ones. The Jobs heading then counts the hidden jobs, and pressing the
 count shows them all again. A later run that writes to the same file name is a
 new job and shows.
 
@@ -150,9 +159,9 @@ reported, and asks why it failed. If Claude is working, the prompt waits for
 the current turn to end. The button then reads Asked Claude for the rest of the
 session, unless the prompt was refused, in which case it returns.
 
-The pane opens by itself the first time a job starts running in a session, if
-the terminal is at least 144 columns wide. It does not open by itself again in
-that session once closed. `/progress` opens it at any width. While a job runs,
+The pane opens by itself when a session starts, if the terminal is at least
+144 columns wide. It does not open by itself again in that session once
+closed. `/progress` opens it at any width. While a job runs,
 the status line under the prompt also names up to two jobs with their
 percentages, such as `build 58% · sync running · 1 more`.
 

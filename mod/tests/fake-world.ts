@@ -9,6 +9,21 @@ const segments = (path: string) =>
   path.split(/[\\/]/).filter(part => part !== '' && !/^[A-Za-z]:$/.test(part))
 const fileNameOf = (path: string) => segments(path).at(-1) ?? ''
 export const POLL_MS = 500
+export const BODY_COLUMNS = 40
+
+export const PANE = {
+  plugin: 'shell-progress',
+  component: 'Pane',
+  requestId: 'shell-progress',
+  props: {
+    title: 'This session',
+    isFocused: false,
+    bodyColumns: BODY_COLUMNS,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 30 },
+    view: {},
+  },
+} as const
 export const START_MS = 1_700_000_000_000
 export const STARTED_SEC = START_MS / 1000
 
@@ -90,7 +105,13 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     world.logs.push(e.text)
     return { value: undefined }
   })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
   return { world, clock }
+}
+
+export async function mountPane($: Engine) {
+  return $.ui.mount({ ...PANE, surface: 'terminal' })
 }
 
 export async function startSession($: Engine): Promise<void> {

@@ -3,23 +3,16 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { FakeFile } from './fake-world'
-import { POLL_MS, START_MS, STARTED_SEC, fakeWorld, runningLine, startSession } from './fake-world'
-
-const BODY_COLUMNS = 40
-
-const PANE = {
-  plugin: 'shell-progress',
-  component: 'Pane',
-  requestId: 'shell-progress',
-  props: {
-    title: 'Background jobs',
-    isFocused: false,
-    bodyColumns: BODY_COLUMNS,
-    placement: 'dock',
-    scroll: { offset: 0, bodyRows: 30 },
-    view: {},
-  },
-} as const
+import {
+  PANE,
+  POLL_MS,
+  START_MS,
+  STARTED_SEC,
+  fakeWorld,
+  mountPane,
+  runningLine,
+  startSession,
+} from './fake-world'
 
 const finishedLine = (exitCode: number, seconds: number) =>
   `${STARTED_SEC} done ${exitCode} ${STARTED_SEC + seconds}\n`
@@ -31,10 +24,6 @@ async function runProgressCommand($: Engine) {
     origin: { kind: 'composer' },
     presentation: { isFullscreen: true, columns: 160 },
   })
-}
-
-async function mountPane($: Engine) {
-  return $.ui.mount({ ...PANE, surface: 'terminal' })
 }
 
 test('the pane draws running, finished and failed jobs', async ($, on) => {
@@ -115,10 +104,8 @@ test('a job that finished before the session started is not drawn', async ($, on
   await clock.advance(POLL_MS)
 
   const ui = await mountPane($)
-  expect(await ui.find({ type: 'Text', text: 'old.sh' })).toBeUndefined()
-  expect((await ui.find({ type: 'Text', text: /No jobs yet/ }))?.text).toBe(
-    'No jobs yet. A script that sources the helpers shows here.',
-  )
+  expect(await ui.find({ type: 'Button', text: 'old.sh' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Jobs' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -185,10 +172,11 @@ test('a long label is cut at the edge of the pane', async ($, on) => {
 test('/progress opens the pane', async ($, on) => {
   const { world } = fakeWorld(on, new Map())
   await startSession($)
+  world.opens.length = 0
 
   const result = await runProgressCommand($)
   expect(world.opens).toEqual(['shell-progress'])
-  expect(result.text).toBe('Background jobs pane opened.')
+  expect(result.text).toBe('Session pane opened.')
 })
 
 test('/progress says why the pane is not shown where nothing can draw it', async ($, on) => {
@@ -197,7 +185,7 @@ test('/progress says why the pane is not shown where nothing can draw it', async
   await startSession($)
 
   const result = await runProgressCommand($)
-  expect(result.text).toBe('Background jobs pane opened but not shown: no-surface: none is attached')
+  expect(result.text).toBe('Session pane opened but not shown: no-surface: none is attached')
 })
 
 test('a new file that cannot be read shows as unreadable', async ($, on) => {
@@ -325,7 +313,7 @@ test('dismissed stalled and finished jobs are stored, counted as hidden and show
     await ui.press({ key: `dismiss:${file}` })
   }
   expect(await ui.find({ type: 'Button', text: /\.sh$/ })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /No jobs yet/ })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: 'Jobs' }))?.text).toBe('Jobs')
   expect(world.store.get('dismissedJobs')).toEqual([
     `build.sh-1.txt:${STARTED_SEC}`,
     `lint.sh-2.txt:${STARTED_SEC}`,

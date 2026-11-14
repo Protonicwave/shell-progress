@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, PluginOptions, Register } from 'claude-code'
+import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
 
-import type { Job } from '../types'
+import type { Job, RunningCall, SessionTurn } from '../types'
 import type { FinishedJob } from './progress'
 import { PANE_ID, PANE_TITLE, drawPane } from './pane'
 import { POLL_INTERVAL_MS, pollJobs } from './poll'
@@ -14,6 +14,7 @@ import {
   isWorthNotifying,
   statusSummary,
 } from './progress'
+import { NO_TOOL_CALLS, endTurnCalls, recordEnd, recordStart, toolArgumentText } from './session'
 
 const COMMAND_NAME = 'progress'
 // A poll still running after this long is logged, once, as stuck.
@@ -31,7 +32,7 @@ const jobs = atom({ plugin: 'shell-progress', key: 'jobs' } as const, [], {
   shape: 'jobs-3',
 })
 // Set once the pane has opened by itself, so a person who closes it is not
-// shown it again in the same session.
+// shown it again when the module reloads.
 const hasOpenedPane = atom({ plugin: 'shell-progress', key: 'hasOpenedPane' } as const, false)
 const expandedJob = atom({ plugin: 'shell-progress', key: 'expandedJob' } as const, null)
 // Loaded from the plugin's store at session start and written back on each
@@ -39,6 +40,16 @@ const expandedJob = atom({ plugin: 'shell-progress', key: 'expandedJob' } as con
 const dismissedJobs = atom({ plugin: 'shell-progress', key: 'dismissedJobs' } as const, [])
 // One key per press of a button that then goes, so it stays small without a cap.
 const askedJobs = atom({ plugin: 'shell-progress', key: 'askedJobs' } as const, [])
+// Shaped like `jobs`, so a later change to their types declines what this
+// version stored.
+const toolCalls = atom({ plugin: 'shell-progress', key: 'toolCalls' } as const, NO_TOOL_CALLS, {
+  shape: 'tool-calls-1',
+})
+const sessionTurn = atom(
+  { plugin: 'shell-progress', key: 'sessionTurn' } as const,
+  { kind: 'waiting', lastDurationMs: null },
+  { shape: 'session-turn-1' },
+)
 
 export const register: Register = (on, options) => {
   const stallMs = positiveMinutesOf(options, 'stallMinutes') * MS_PER_MINUTE
@@ -47,29 +58,34 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: COMMAND_NAME,
-      description: 'Show the background jobs pane',
+      description: 'Show the session pane',
     })
     await loadDismissedJobs($)
     startPolling($, await progressDir($), stallMs, notifySeconds)
+    if (!(await read($, hasOpenedPane))) await openPaneOnce($)
     return next(e)
   })
+
+  followSession(on)
 
   on('command.run', { command: COMMAND_NAME }, async $ => {
     const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
     return {
       text: opened.isPlaced
-        ? `${PANE_TITLE} pane opened.`
-        : `${PANE_TITLE} pane opened but not shown: ${opened.reason}`,
+        ? 'Session pane opened.'
+        : `Session pane opened but not shown: ${opened.reason}`,
     }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
-    const [jobList, dir, expanded, dismissed, asked, nowMs, usage] = await Promise.all([
+    const [jobList, dir, expanded, dismissed, asked, calls, turn, nowMs, usage] = await Promise.all([
       read($, jobs),
       progressDir($),
       read($, expandedJob),
       read($, dismissedJobs),
       read($, askedJobs),
+      read($, toolCalls),
+      read($, sessionTurn),
       $.clock.now(),
       $.session.usage(),
     ])
@@ -84,7 +100,58 @@ export const register: Register = (on, options) => {
       sessionStartedMs: usage.startedAt,
       stallMs,
       actions: jobActions($),
+      toolCalls: calls,
+      turn,
     })
+  })
+}
+
+/**
+ * Records the main conversation's turns and tool calls for the pane. A
+ * subagent's are left to its own row: listed here they would crowd out the
+ * main conversation's.
+ */
+function followSession(on: On): void {
+  // Moves the pane's timers on while a turn runs. Kept by this copy of the
+  // module, which drops it on reload; the next turn starts another.
+  let turnTimer: Timer | undefined
+
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
+    const startedMs = await $.clock.now()
+    await update($, sessionTurn, (): SessionTurn => ({ kind: 'running', startedMs }))
+    turnTimer ??= $.clock.every(POLL_INTERVAL_MS, () => $.ui.invalidate('ui.render'))
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
+    turnTimer?.cancel()
+    turnTimer = undefined
+    await update($, sessionTurn, (): SessionTurn => ({ kind: 'waiting', lastDurationMs: e.durationMs }))
+    await update($, toolCalls, endTurnCalls)
+    return next(e)
+  })
+
+  // Only times the call: the result and any rejection pass through unchanged.
+  on('tool.call', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
+    const call: RunningCall = {
+      id: e.tool_use_id,
+      tool: e.tool,
+      argument: toolArgumentText(e.tool, e),
+      startedMs: await $.clock.now(),
+    }
+    await update($, toolCalls, calls => recordStart(calls, call))
+    let hasFailed = true
+    try {
+      const result = await next(e)
+      hasFailed = result.deny !== undefined || result.isError === true
+      return result
+    } finally {
+      const endedMs = await $.clock.now()
+      await update($, toolCalls, calls => recordEnd(calls, { ...call, endedMs, hasFailed }))
+    }
   })
 }
 
@@ -227,7 +294,6 @@ async function pollOnce(
   const isAnyLive = shown.some(job => isLive(job, nowMs, stallMs))
   const finished = finishedSince(previous, shown)
   if (finished.length > 0) announceFinished($, finished, notifySeconds)
-  if (isAnyLive && !(await read($, hasOpenedPane))) await openPaneOnce($)
 
   // A running job's elapsed time and spinner move on every poll even when no
   // file changed, so the pane is drawn again while one runs. A stalled job's
@@ -266,7 +332,6 @@ function isLive(job: Job, nowMs: number, stallMs: number): boolean {
 }
 
 async function openPaneOnce($: EngineInterface): Promise<void> {
-  // Marked first, so a slow open cannot let the next poll open it again.
   await update($, hasOpenedPane, () => true)
   // Too narrow a terminal leaves the pane unplaced, waiting for more width or
   // for /progress, which is the behaviour wanted, so the answer is not used.
