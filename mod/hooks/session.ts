@@ -1,6 +1,6 @@
 import type { AgentInfo, SessionUsage } from 'claude-code'
 
-import type { EndedCall, ListedAgent, RunningCall, ToolCalls } from '../types'
+import type { EndedCall, ListedAgent, RunningCall, ToolCalls, TurnContext } from '../types'
 import { MS_PER_SECOND, SECONDS_PER_MINUTE, clockTimeText, durationText } from './progress'
 
 /** How many ended calls the pane lists, newest first. */
@@ -116,17 +116,34 @@ const TOKENS_PER_THOUSAND = 1_000
 const TOKENS_PER_MILLION = 1_000_000
 const FIVE_HOUR_LIMIT_KIND = 'five_hour'
 
+export const NO_TURN_CONTEXT: TurnContext = { startTokens: null, lastAddedTokens: null }
+
+export function startTurnContext(context: TurnContext, usage: SessionUsage): TurnContext {
+  return { ...context, startTokens: usage.context.tokens ?? null }
+}
+
+/** Records what the turn added, which replaces the last turn's figure even when it is unknown. */
+export function endTurnContext(context: TurnContext, usage: SessionUsage): TurnContext {
+  const endTokens = usage.context.tokens
+  const isCounted = context.startTokens !== null && endTokens !== undefined
+  return {
+    startTokens: null,
+    lastAddedTokens: isCounted ? endTokens - context.startTokens : null,
+  }
+}
+
 /**
  * The context window's bar and the five-hour limit's, each only when the
  * session has its reading: none before the first response, no limit off a
  * subscription, and neither for a percentage that is not a finite number.
+ * The context figures end with `lastAddedTokens`, unless it rounds to none.
  */
-export function usageRows(usage: SessionUsage): readonly UsageRow[] {
+export function usageRows(usage: SessionUsage, lastAddedTokens: number | null): readonly UsageRow[] {
   const rows: UsageRow[] = []
   const { tokens, window, percent } = usage.context
   if (percent !== undefined && Number.isFinite(percent)) {
     const tokenFigures = tokens === undefined ? '' : ` · ${tokensText(tokens)} of ${tokensText(window)}`
-    rows.push(usageRow('context', percent, tokenFigures))
+    rows.push(usageRow('context', percent, tokenFigures + addedTokensText(lastAddedTokens)))
   }
   const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
   if (limit !== undefined && Number.isFinite(limit.percentUsed)) {
@@ -144,6 +161,12 @@ function usageRow(label: string, percent: number, laterFigures: string): UsageRo
     fraction: Math.min(1, Math.max(0, percent / PERCENT)),
     figures: `${Math.round(percent)}%${laterFigures}`,
   }
+}
+
+/** ` · +12k` or ` · -61k`; empty for `null` or what rounds to no thousands. */
+function addedTokensText(addedTokens: number | null): string {
+  if (addedTokens === null || Math.round(Math.abs(addedTokens) / TOKENS_PER_THOUSAND) === 0) return ''
+  return ` · ${addedTokens > 0 ? '+' : '-'}${tokensText(Math.abs(addedTokens))}`
 }
 
 /** `76k`, or `1M` from a million. */

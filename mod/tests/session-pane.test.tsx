@@ -196,6 +196,24 @@ test('each usage bar shares a row with its label and figures, and the cost follo
   await ui.unmount()
 })
 
+test('the context figures end with what the last turn added', async ($, on) => {
+  const { world } = fakeWorld(on, new Map())
+  const contextAt = (tokens: number, percent: number) => ({
+    startedAt: START_MS,
+    context: { tokens, window: 200_000, percent },
+    rateLimits: [],
+  })
+  world.usage = contextAt(76_000, 38)
+  await startSession($)
+  await startTurn($)
+  world.usage = contextAt(88_000, 44)
+  await completeTurn($, 1_000)
+
+  const ui = await mountPane($)
+  expect((await ui.find({ type: 'Text', text: /^44% · / }))?.text).toBe('44% · 88k of 200k · +12k')
+  await ui.unmount()
+})
+
 test('below 40 columns each usage bar takes a row of its own under its label and figures', async ($, on) => {
   const { world } = fakeWorld(on, new Map())
   world.usage = HIGH_USAGE

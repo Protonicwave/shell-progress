@@ -71,6 +71,14 @@ export type ListedAgent = {
   readonly status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed'
 }
 
+/** The main conversation's context at the start of the running turn, and what the last finished turn added. */
+export type TurnContext = {
+  /** Tokens when the running turn started; `null` when no turn runs or none had been counted yet. */
+  readonly startTokens: number | null
+  /** Negative when the turn compacted the context; `null` when either reading was missing. */
+  readonly lastAddedTokens: number | null
+}
+
 /** Whether the main conversation's turn is running, and how long the last one took. */
 export type SessionTurn =
   | { readonly kind: 'running'; readonly startedMs: number }
@@ -93,6 +101,7 @@ declare module 'claude-code' {
       askedJobs: readonly string[]
       toolCalls: Shaped<ToolCalls>
       sessionTurn: Shaped<SessionTurn>
+      turnContext: Shaped<TurnContext>
       /** In the order the mod first saw them, oldest first. */
       agents: Shaped<readonly ListedAgent[]>
     }

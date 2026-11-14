@@ -4,12 +4,15 @@ import type { AgentInfo, AgentStatus, SessionUsage } from 'claude-code'
 import type { EndedCall, RunningCall, ToolCalls } from '../types'
 import {
   NO_TOOL_CALLS,
+  NO_TURN_CONTEXT,
   costText,
+  endTurnContext,
   shortDurationText,
   endTurnCalls,
   mergeAgents,
   recordEnd,
   recordStart,
+  startTurnContext,
   toolArgumentText,
   usageRows,
 } from '../hooks/session'
@@ -184,6 +187,7 @@ describe('usageRows', () => {
           { kind: 'five_hour', percentUsed: 63.5, resetsAt: new Date(RESETS_MS).toISOString() },
         ],
       }),
+      null,
     )
     expect(rows).toEqual([
       { label: 'context', fraction: 0.38, figures: '38% · 76k of 200k' },
@@ -197,12 +201,13 @@ describe('usageRows', () => {
         context: { window: 200_000, percent: Number.NaN },
         rateLimits: [{ kind: 'five_hour', percentUsed: Number.POSITIVE_INFINITY }],
       }),
+      null,
     )
     expect(rows).toEqual([])
   })
 
   test('a fresh session with no limit reading has no bars', () => {
-    expect(usageRows(usage({}))).toEqual([])
+    expect(usageRows(usage({}), null)).toEqual([])
   })
 
   test('a context reading without tokens, or a limit without a reset, shows the percentage alone', () => {
@@ -211,23 +216,68 @@ describe('usageRows', () => {
         context: { window: 200_000, percent: 5 },
         rateLimits: [{ kind: 'five_hour', percentUsed: 7 }],
       }),
+      null,
     )
     expect(rows.map(row => row.figures)).toEqual(['5%', '7%'])
   })
 
   test('a reset time that is not a date is left out', () => {
-    const rows = usageRows(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 7, resetsAt: 'soon' }] }))
+    const rows = usageRows(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 7, resetsAt: 'soon' }] }), null)
     expect(rows.map(row => row.figures)).toEqual(['7%'])
   })
 
   test('a window of a million tokens or more is counted in millions', () => {
-    const rows = usageRows(usage({ context: { tokens: 250_000, window: 1_000_000, percent: 25 } }))
+    const rows = usageRows(usage({ context: { tokens: 250_000, window: 1_000_000, percent: 25 } }), null)
     expect(rows[0]?.figures).toBe('25% · 250k of 1M')
   })
 
   test('a limit past 100% fills its bar and no more', () => {
-    const rows = usageRows(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 104 }] }))
+    const rows = usageRows(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 104 }] }), null)
     expect(rows[0]).toEqual({ label: '5h limit', fraction: 1, figures: '104%' })
+  })
+})
+
+describe('usageRows with the context the last turn added', () => {
+  const contextOf = (lastAddedTokens: number | null) =>
+    usageRows(usage({ context: { tokens: 88_000, window: 200_000, percent: 44 } }), lastAddedTokens)[0]?.figures
+
+  test('ends the context figures with what the turn added', () => {
+    expect(contextOf(12_400)).toBe('44% · 88k of 200k · +12k')
+  })
+
+  test('shows a context that shrank, as after compaction, as a negative figure', () => {
+    expect(contextOf(-61_000)).toBe('44% · 88k of 200k · -61k')
+  })
+
+  for (const added of [0, 400, -499, null]) {
+    test(`shows nothing for ${added} tokens added`, () => {
+      expect(contextOf(added)).toBe('44% · 88k of 200k')
+    })
+  }
+})
+
+describe('turn context', () => {
+  const at = (tokens: number | undefined) =>
+    usage({ context: tokens === undefined ? { window: 200_000 } : { tokens, window: 200_000 } })
+
+  test('a finished turn records what it added since it started', () => {
+    const started = startTurnContext(NO_TURN_CONTEXT, at(76_000))
+    expect(endTurnContext(started, at(88_000))).toEqual({ startTokens: null, lastAddedTokens: 12_000 })
+  })
+
+  test('a turn that started before the first response records nothing', () => {
+    const started = startTurnContext(NO_TURN_CONTEXT, at(undefined))
+    expect(endTurnContext(started, at(30_000))).toEqual(NO_TURN_CONTEXT)
+  })
+
+  test('a turn whose end has no reading replaces the last figure with none', () => {
+    const earlier = { startTokens: 76_000, lastAddedTokens: 5_000 }
+    expect(endTurnContext(earlier, at(undefined))).toEqual(NO_TURN_CONTEXT)
+  })
+
+  test('starting a turn keeps the figure the last turn left', () => {
+    const earlier = { startTokens: null, lastAddedTokens: 5_000 }
+    expect(startTurnContext(earlier, at(80_000))).toEqual({ startTokens: 80_000, lastAddedTokens: 5_000 })
   })
 })
 

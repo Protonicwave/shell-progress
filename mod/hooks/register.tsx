@@ -19,10 +19,13 @@ import {
 } from './progress'
 import {
   NO_TOOL_CALLS,
+  NO_TURN_CONTEXT,
   endTurnCalls,
+  endTurnContext,
   mergeAgents,
   recordEnd,
   recordStart,
+  startTurnContext,
   toolArgumentText,
 } from './session'
 
@@ -60,6 +63,9 @@ const sessionTurn = atom(
   { kind: 'waiting', lastDurationMs: null },
   { shape: 'session-turn-1' },
 )
+const turnContext = atom({ plugin: 'shell-progress', key: 'turnContext' } as const, NO_TURN_CONTEXT, {
+  shape: 'turn-context-1',
+})
 const agents = atom({ plugin: 'shell-progress', key: 'agents' } as const, [], { shape: 'agents-1' })
 
 export const register: Register = (on, options) => {
@@ -89,7 +95,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
-    const [jobList, dir, expanded, dismissed, asked, calls, turn, agentList, nowMs, usage] =
+    const [jobList, dir, expanded, dismissed, asked, calls, turn, context, agentList, nowMs, usage] =
       await Promise.all([
         read($, jobs),
         progressDir($),
@@ -98,6 +104,7 @@ export const register: Register = (on, options) => {
         read($, askedJobs),
         read($, toolCalls),
         read($, sessionTurn),
+        read($, turnContext),
         read($, agents),
         $.clock.now(),
         $.session.usage(),
@@ -115,6 +122,7 @@ export const register: Register = (on, options) => {
       actions: paneActions($),
       toolCalls: calls,
       turn,
+      turnContext: context,
       agents: agentList,
     })
   })
@@ -132,8 +140,9 @@ function followSession(on: On): void {
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
-    const startedMs = await $.clock.now()
+    const [startedMs, usage] = await Promise.all([$.clock.now(), $.session.usage()])
     await update($, sessionTurn, (): SessionTurn => ({ kind: 'running', startedMs }))
+    await update($, turnContext, context => startTurnContext(context, usage))
     turnTimer ??= $.clock.every(POLL_INTERVAL_MS, () => $.ui.invalidate('ui.render'))
     return next(e)
   })
@@ -143,6 +152,8 @@ function followSession(on: On): void {
     turnTimer?.cancel()
     turnTimer = undefined
     await update($, sessionTurn, (): SessionTurn => ({ kind: 'waiting', lastDurationMs: e.durationMs }))
+    const usage = await $.session.usage()
+    await update($, turnContext, context => endTurnContext(context, usage))
     await update($, toolCalls, endTurnCalls)
     return next(e)
   })

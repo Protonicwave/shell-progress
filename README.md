@@ -148,7 +148,10 @@ list when Claude Code stops tracking it, shortly after it ends.
 
 At the foot of the pane, a bar shows how full the context window is, such as
 `38% · 76k of 200k`, and another how much of the five-hour usage limit is
-used and when it resets, such as `63% · resets 16:00`. Each bar shares a row
+used and when it resets, such as `63% · resets 16:00`. Once a turn has
+ended, the context figures end with what it added to the context, such as
+`+12k`, or `-61k` for a turn that compacted it; a turn that added under 500
+tokens shows none. Each bar shares a row
 with its label and figures; in a pane narrower than 40 columns it takes a row
 of its own under them. Either bar takes the theme's warning colour from 80%. Below them is the session's cost so far, as
 `/cost` totals it. A figure Claude Code does not have is left out: the context

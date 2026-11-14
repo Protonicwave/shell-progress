@@ -1,6 +1,6 @@
 import type { Color, Elements, RenderNode, SessionUsage } from 'claude-code'
 
-import type { EndedCall, Job, ListedAgent, RunningCall, SessionTurn, ToolCalls } from '../types'
+import type { EndedCall, Job, ListedAgent, RunningCall, SessionTurn, ToolCalls, TurnContext } from '../types'
 import { POLL_INTERVAL_MS } from './poll'
 import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
 import {
@@ -79,6 +79,7 @@ type PaneView = {
   readonly actions: PaneActions
   readonly toolCalls: ToolCalls
   readonly turn: SessionTurn
+  readonly turnContext: TurnContext
   /** Oldest first. */
   readonly agents: readonly ListedAgent[]
 }
@@ -217,7 +218,7 @@ function recentGroup(ui: PaneElements, calls: readonly EndedCall[]): RenderNode 
  */
 function usageGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   const { Box, Text } = ui
-  const rows = usageRows(view.usage)
+  const rows = usageRows(view.usage, view.turnContext.lastAddedTokens)
   const cost = costText(view.usage)
   if (rows.length === 0 && cost === undefined) return undefined
   const drawRow =
