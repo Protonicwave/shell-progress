@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Background jobs pane</title>
-<meta name="description" content="Mockup of a Claude Code mod that draws live progress bars for background scripts beside the chat.">
+<title>Session and jobs pane</title>
+<meta name="description" content="Mockup of a proposed session pane and seven job features for a Claude Code mod that draws live progress bars for background scripts beside the chat.">
 <style>
 :root {
   /* Page chrome: neutral tinted toward the terminal's cool blue-grey */
@@ -27,7 +27,14 @@
   --accent: oklch(0.8 0.14 72);          /* running bars: warm amber */
   --done: oklch(0.78 0.13 150);
   --failed: oklch(0.7 0.17 25);
+  --stalled: oklch(0.86 0.13 95);        /* stalled: a yellow apart from the amber accent */
   --you: oklch(0.82 0.05 250);
+
+  /* Mock Windows notification card */
+  --win: oklch(0.97 0.003 250);
+  --win-ink: oklch(0.22 0.01 250);
+  --win-muted: oklch(0.45 0.01 250);
+  --win-line: oklch(0.86 0.005 250);
 
   --mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
   --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
@@ -66,6 +73,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -79,9 +87,11 @@ body {
 
 header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: var(--s4) var(--s6); margin-bottom: var(--s5); }
 h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height: 1.1; letter-spacing: -0.02em; font-weight: 650; text-wrap: balance; }
-.lede { margin: var(--s2) 0 0; color: var(--page-muted); max-width: 58ch; text-wrap: pretty; }
+.lede { margin: var(--s2) 0 0; color: var(--page-muted); max-width: 62ch; text-wrap: pretty; }
 
 .controls { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: center; }
+.ctl { display: inline-flex; align-items: center; gap: var(--s2); }
+.ctl-l { font: 500 14px/1 var(--sans); color: var(--page-muted); }
 .seg { display: inline-flex; border: 1px solid var(--page-line); border-radius: var(--r-control); background: var(--control); padding: 2px; }
 .seg button, .btn {
   font: 500 14px/1 var(--sans);
@@ -102,6 +112,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 
 /* Terminal window */
 .term {
+  position: relative;
   background: var(--term);
   color: var(--term-ink);
   border-radius: var(--r-window);
@@ -113,13 +124,17 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 }
 .titlebar { display: flex; align-items: center; gap: var(--s3); height: 36px; padding: 0 var(--s3); background: var(--term-raised); border-bottom: 1px solid var(--term-line); font: 12px/1 var(--sans); color: var(--term-dim); }
 .tab { background: var(--term); color: var(--term-ink); padding: 7px var(--s3); border-radius: 6px 6px 0 0; align-self: end; }
-.cols { margin-left: auto; font-family: var(--mono); color: var(--term-faint); }
+.cols { margin-left: auto; font-family: var(--mono); color: var(--term-dim); }
 
-.screen { display: grid; grid-template-columns: minmax(0, 1fr) 42ch; min-height: 440px; }
+.screen { display: grid; grid-template-columns: minmax(0, 1fr) 46ch; height: 38rem; }
 .term[data-cols="100"] .screen { grid-template-columns: minmax(0, 1fr); }
+.term[data-cols="100"] .toasts { right: var(--s3); }
 .term[data-cols="100"] .pane { display: none; }
 
-.transcript { padding: var(--s4) var(--s4) var(--s3); min-width: 0; }
+.transcript { padding: var(--s4) var(--s4) var(--s3); min-width: 0; min-height: 0; overflow-y: auto; overflow-anchor: none; }
+.subbar { margin: 0 0 var(--s3); }
+.subtitle { margin: 0 0 var(--s3); }
+.line .sub .bad { color: var(--failed); }
 .line { margin: 0 0 var(--s2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .line.you { color: var(--you); }
 .line .mark { color: var(--term-ink); }
@@ -130,51 +145,157 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .line.note .bad { color: var(--failed); }
 .line.enter { animation: fade-tint 1.6s var(--ease); }
 
-.pane { border-left: 1px solid var(--term-line); padding: var(--s4) var(--s4) var(--s3); min-width: 0; }
-.pane-head { display: flex; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s3); }
+.pane { border-left: 1px solid var(--term-line); padding: var(--s4) var(--s4) var(--s3); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.pane :focus-visible { outline-offset: -2px; }
+.pane-head { display: flex; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s3); flex: none; }
 .pane-title { font-weight: 700; }
-.pane-count { color: var(--term-dim); }
+.pane-count { color: var(--term-dim); text-align: right; }
+.link { font: inherit; color: var(--term-ink); background: none; border: 0; padding: 0 var(--s1); min-height: 24px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; border-radius: 4px; }
+.link:hover { background: var(--term-raised); }
+.pane-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0 calc(var(--s2) * -1); padding: 0 var(--s2); }
 .group { color: var(--term-dim); margin: var(--s4) 0 var(--s2); }
-.job { margin-bottom: var(--s3); }
+.keys { flex: none; margin: var(--s3) 0 0; padding-top: var(--s2); border-top: 1px solid var(--term-line); color: var(--term-dim); font-size: 12px; }
+
+/* Session pane: Now is pinned above the list, the gauges below it. Jobs only mode hides every .sess part. */
+.pane[data-mode="jobs"] .sess { display: none; }
+.now { flex: none; margin: 0 0 var(--s1); padding: var(--s2) var(--s3); background: var(--term-raised); border-radius: 6px; min-height: 36px; }
+.now.idle .row > :first-child { white-space: normal; }
+.jobs-label { display: flex; justify-content: space-between; align-items: center; gap: var(--s2); }
+.none { margin: 0 0 var(--s2) var(--s2); }
+.rrow { padding: 0 var(--s2); margin-bottom: var(--s1); border-radius: 6px; }
+.rrow .r-tool { color: var(--term-ink); }
+.rrow .bad { color: var(--failed); }
+.foot { flex: none; margin: var(--s3) 0 0; padding-top: var(--s2); border-top: 1px solid var(--term-line); }
+.gauge { margin-bottom: var(--s2); }
+.cost { margin: 0; color: var(--term-dim); }
+.meter { position: relative; display: block; width: 24ch; height: 1.35em; line-height: 1.35; white-space: pre; overflow: hidden; }
+.m-empty { color: var(--term-faint); }
+.m-fill { position: absolute; left: 0; top: 0; clip-path: inset(0 100% 0 0); color: var(--accent); transition: clip-path 0.25s var(--ease); }
+.meter.hot .m-fill { color: var(--stalled); }
+
+.job, .agent { position: relative; margin-bottom: var(--s2); border-radius: 6px; }
 .row { display: flex; justify-content: space-between; gap: var(--s2); min-width: 0; }
 .row > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.row > :last-child { flex: none; }
+.row > :last-child { flex: none; white-space: pre; }
 .name { font-weight: 700; }
 .step { color: var(--term-dim); }
 .bar { display: block; white-space: pre; letter-spacing: 0; line-height: 1.35; }
 .bar .fill { color: var(--accent); }
 .bar .empty { color: var(--term-faint); }
 .spin { color: var(--accent); }
-.job.finished .row { color: var(--term-dim); }
+.job.stalled .bar { opacity: 0.4; }
+.job .t3.stalled { color: var(--stalled); }
+.job.finished .row-btn { color: var(--term-dim); }
+.job.finished .name { font-weight: 400; }
 .job.finished .ok { color: var(--done); }
 .job.finished .bad { color: var(--failed); }
-.job.enter { animation: fade-tint 1.6s var(--ease); }
+.agent.done .row-btn { color: var(--term-dim); }
+.agent.done .name { font-weight: 400; }
+.agent .ok { color: var(--done); }
+.job.enter, .agent.enter, .rrow.enter { animation: fade-tint 1.6s var(--ease); }
 @keyframes fade-tint { from { background: oklch(0.8 0.14 72 / 0.14); } to { background: transparent; } }
+
+.row-btn {
+  display: block; width: 100%; min-height: 24px;
+  text-align: left; font: inherit; color: inherit;
+  background: transparent; border: 0; border-radius: 6px;
+  padding: var(--s1) var(--s2);
+  cursor: pointer;
+}
+.row-btn:hover, .row-btn[aria-expanded="true"] { background: var(--term-raised); }
+
+.act {
+  font: 12px/1.2 var(--mono); color: var(--term-ink);
+  background: transparent; border: 1px solid var(--term-line); border-radius: 4px;
+  padding: var(--s1) var(--s2); min-height: 28px; cursor: pointer; text-align: left;
+}
+.act:hover:not(:disabled) { background: var(--term-raised); border-color: var(--term-faint); }
+.act:disabled { color: var(--term-dim); cursor: default; }
+.act.stop { color: var(--failed); }
+@media (pointer: coarse) { .act, .link, .row-btn { min-height: 44px; } }
+
+.quick { padding: 0 var(--s2) var(--s1); display: flex; gap: var(--s2); }
+.q-dis { position: absolute; top: 2px; right: var(--s2); background: var(--term-raised); opacity: 0; }
+.job:hover .q-dis, .job:focus-within .q-dis { opacity: 1; }
+@media (hover: none) { .q-dis { display: none; } }
+
+.details { display: none; overflow: hidden; }
+.details[data-open] { display: block; }
+.details-pad { margin: var(--s1) 0 var(--s1) var(--s3); padding: var(--s1) var(--s2) var(--s1) var(--s3); border-left: 1px solid var(--term-line); }
+.details p { margin: 0 0 var(--s1); }
+.path { color: var(--term-ink); overflow-wrap: anywhere; }
+.meta { display: flex; flex-wrap: wrap; gap: 0 var(--s4); color: var(--term-dim); }
+.logl { color: var(--term-dim); font-size: 12px; margin-top: var(--s2) !important; }
+.log { margin: 0 0 var(--s2) var(--s2); padding-left: var(--s2); border-left: 1px solid var(--term-line); color: var(--term-dim); font: 12px/1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.confirm { margin-top: var(--s1); }
+.confirm .cq { color: var(--term-ink); }
 
 .prompt { margin: 0 var(--s4); border: 1px solid var(--term-line); border-radius: 6px; padding: var(--s2) var(--s3); color: var(--term-dim); }
 .prompt .caret { color: var(--term-ink); }
 .cursor { display: inline-block; width: 0.6em; background: var(--term-ink); color: transparent; }
 .status { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s5); padding: var(--s2) var(--s4) var(--s3); color: var(--term-dim); }
-.status .jobs { color: var(--term-ink); display: inline-flex; flex-wrap: wrap; gap: 0 var(--s4); }
+.status .jobs { color: var(--term-ink); display: inline-flex; flex-wrap: wrap; white-space: pre-wrap; }
 .status .jobs b { color: var(--accent); font-weight: 400; }
-.status .hint { color: var(--term-faint); }
+.status .jobs b.stall { color: var(--stalled); }
+.status .hint { color: var(--term-dim); }
 
-.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--s5) var(--s6); margin-top: var(--s6); color: var(--page-muted); font-size: 15px; }
-.notes h2 { margin: 0 0 var(--s1); font-size: 15px; color: var(--page-ink); font-weight: 600; }
-.notes p { margin: 0; text-wrap: pretty; }
-.notes code { font: 13.5px var(--mono); color: var(--page-ink); }
+/* Toasts sit inside the terminal window; the notification card sits outside it */
+/* Toasts float over the transcript's top right corner, clear of the pane. */
+.toasts { position: absolute; top: 44px; right: calc(46ch + var(--s3)); z-index: 2; width: min(280px, calc(100% - 24px)); display: flex; flex-direction: column; gap: var(--s2); pointer-events: none; }
+.toast {
+  pointer-events: auto; display: block; width: 100%; text-align: left;
+  font: inherit; color: var(--term-ink); cursor: pointer;
+  background: var(--term-raised); border: 1px solid var(--term-line); border-radius: 6px;
+  padding: var(--s2) var(--s3); min-height: 44px;
+  box-shadow: 0 8px 20px -8px oklch(0 0 0 / 0.6);
+  animation: slide-in 0.22s var(--ease);
+}
+.toast:hover { border-color: var(--term-faint); }
+.toast .t-head { display: block; color: var(--term-dim); font-size: 12px; }
+@keyframes slide-in { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.winstack { position: fixed; right: var(--s3); bottom: var(--s3); z-index: 10; display: flex; flex-direction: column; gap: var(--s2); width: min(340px, calc(100vw - 24px)); pointer-events: none; }
+.winnote {
+  pointer-events: auto; display: block; width: 100%; text-align: left; cursor: pointer;
+  font: 13px/1.4 var(--sans); color: var(--win-ink);
+  background: var(--win); border: 1px solid var(--win-line); border-radius: 8px;
+  padding: var(--s3) var(--s4); min-height: 44px;
+  box-shadow: 0 8px 24px oklch(0 0 0 / 0.28);
+  animation: slide-in 0.22s var(--ease);
+}
+.winnote .w-head { display: block; font-size: 12px; font-weight: 600; color: var(--win-muted); margin-bottom: 2px; }
+
+/* Seven proposals */
+.proposals { margin-top: var(--s6); }
+.proposals h2 { margin: 0 0 var(--s3); font-size: 1.25rem; line-height: 1.2; letter-spacing: -0.01em; font-weight: 650; }
+.plist { margin: 0; padding: 0 0 0 var(--s5); }
+.plist li { padding: var(--s3) 0 var(--s3) var(--s2); border-top: 1px solid var(--page-line); }
+.plist li::marker { color: var(--page-muted); font-variant-numeric: tabular-nums; }
+.item { display: flex; gap: var(--s4); align-items: flex-start; justify-content: space-between; }
+.item > div { min-width: 0; }
+.item h3 { margin: 0; font-size: 16px; line-height: 1.4; font-weight: 600; }
+.item p { margin: var(--s1) 0 0; color: var(--page-muted); font-size: 15px; max-width: 64ch; text-wrap: pretty; }
+.item code, .facts code, .gap code { font: 13.5px var(--mono); color: var(--page-ink); overflow-wrap: anywhere; }
+.gap { margin: var(--s5) 0 0; color: var(--page-muted); font-size: 15px; max-width: 80ch; text-wrap: pretty; }
+.item .btn { flex: none; }
+.facts { margin: var(--s5) 0 0; padding-top: var(--s4); border-top: 1px solid var(--page-line); color: var(--page-muted); font-size: 15px; max-width: 80ch; text-wrap: pretty; }
 
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 @media (max-width: 760px) {
   :root { --term-size: 12px; }
   .wrap { padding-top: var(--s5); }
-  .screen { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .screen { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .toasts { right: var(--s3); }
+  .transcript { max-height: 16rem; }
   .pane { border-left: 0; border-top: 1px solid var(--term-line); }
+  .pane-list { overflow: visible; }
   .cols { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .line.enter, .job.enter { animation: none; }
+  .line.enter, .job.enter, .agent.enter, .rrow.enter, .toast, .winnote { animation: none; }
+  .m-fill { transition: none; }
   .btn:active, .seg button:active { transform: none; }
 }
 </style>
@@ -183,16 +304,23 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 <div class="wrap">
   <header>
     <div>
-      <h1>Background jobs pane</h1>
-      <p class="lede">A Claude Code mod reads the progress line each script writes and draws a bar per job beside the chat. Narrow the terminal and the summary moves to the status line.</p>
+      <h1>Session and jobs pane</h1>
+      <p class="lede">The shell-progress mod already draws a bar per job beside the chat and names the running jobs on the status line. This mockup shows a proposed session pane, which follows Claude's work in every chat, and seven features for the job rows. The mod has built all but Last lines of output and Stop. Switch the pane to Jobs only to compare it with the scope the mod had before the session pane.</p>
     </div>
     <div class="controls">
+      <div class="ctl">
+        <span class="ctl-l" id="pane-l">Pane</span>
+        <div class="seg" role="group" aria-labelledby="pane-l">
+          <button type="button" data-pane="session" aria-pressed="true">This session</button>
+          <button type="button" data-pane="jobs" aria-pressed="false">Jobs only</button>
+        </div>
+      </div>
       <div class="seg" role="group" aria-label="Terminal width">
         <button type="button" data-cols="160" aria-pressed="true">160 columns</button>
         <button type="button" data-cols="100" aria-pressed="false">100 columns</button>
       </div>
       <button type="button" class="btn" id="pause" aria-pressed="false">Pause live updates</button>
-      <button type="button" class="btn" id="restart">Restart jobs</button>
+      <button type="button" class="btn" id="restart">Restart simulation</button>
     </div>
   </header>
 
@@ -204,45 +332,103 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
       </div>
 
       <div class="screen">
-        <section class="transcript" aria-label="Chat transcript" id="transcript">
+        <section class="transcript" aria-label="Chat transcript" id="transcript" tabindex="0">
           <p class="line you">&gt; run the build and the test suite in the background, and sync the fixtures while you're at it</p>
           <p class="line"><span class="mark">●</span> Starting all three in the background. Each script writes its step to .claude/progress/, so the pane tracks them while I read the migration notes.</p>
           <p class="line"><span class="mark">●</span> <span class="tool">Bash</span>(./scripts/build.sh)<br><span class="sub">  ⎿  Running in the background</span></p>
           <p class="line"><span class="mark">●</span> <span class="tool">Bash</span>(pwsh -File scripts/test-suite.ps1)<br><span class="sub">  ⎿  Running in the background</span></p>
           <p class="line"><span class="mark">●</span> <span class="tool">Bash</span>(./scripts/sync-fixtures.sh)<br><span class="sub">  ⎿  Running in the background</span></p>
-          <p class="line"><span class="mark">●</span> <span class="tool">Read</span>(docs/migrations.md)<br><span class="sub">  ⎿  Read 84 lines</span></p>
         </section>
 
-        <aside class="pane" aria-label="Background jobs pane">
+        <section class="transcript" aria-label="Subagent transcript" id="subview" tabindex="0" hidden>
+          <div class="subbar"><button type="button" class="act" id="back">Back to main conversation</button></div>
+          <p class="group subtitle" id="subtitle"></p>
+          <div id="subbody"></div>
+        </section>
+
+        <aside class="pane" aria-label="Session pane" id="pane" data-mode="session">
           <div class="pane-head">
-            <span class="pane-title">Background jobs</span>
-            <span class="pane-count" id="count"></span>
+            <span class="pane-title" id="pane-title">This session</span>
+            <span class="pane-count" id="head-right">
+              <span class="sess" id="turn"></span>
+              <span id="jobcount"><span id="count"></span><button type="button" class="link" id="unhide" hidden></button></span>
+            </span>
           </div>
-          <div id="running"></div>
-          <div class="group" id="finished-label">Finished</div>
-          <div id="finished"></div>
+          <div class="now sess" id="now">
+            <div class="row"><span><span class="spin" id="now-spin" aria-hidden="true"></span><span class="name" id="now-tool"></span> <span class="step" id="now-arg"></span></span><span class="step" id="now-t"></span></div>
+          </div>
+          <div class="pane-list">
+            <div class="group sess jobs-label" id="jobs-label"><span>Jobs</span></div>
+            <p class="step none sess" id="nojobs" hidden>No scripts reporting progress.</p>
+            <div id="running"></div>
+            <div class="group" id="finished-label">Finished</div>
+            <div id="finished"></div>
+            <div class="group sess">Agents</div>
+            <div class="sess" id="agents"></div>
+            <div class="group sess">Recent</div>
+            <div class="sess" id="recent"><p class="step none" id="recent-none">Nothing finished yet.</p></div>
+          </div>
+          <div class="foot sess">
+            <div class="gauge">
+              <div class="row"><span>context</span><span id="ctx-r"></span></div>
+              <span class="meter" id="ctx-m" role="meter" aria-label="Context used" aria-valuemin="0" aria-valuemax="100"><span class="m-empty" aria-hidden="true"></span><span class="m-fill" aria-hidden="true"></span></span>
+            </div>
+            <div class="gauge">
+              <div class="row"><span>5-hour limit</span><span id="lim-r"></span></div>
+              <span class="meter" id="lim-m" role="meter" aria-label="Five-hour limit used" aria-valuemin="0" aria-valuemax="100"><span class="m-empty" aria-hidden="true"></span><span class="m-fill" aria-hidden="true"></span></span>
+            </div>
+            <p class="cost" id="cost"></p>
+          </div>
+          <p class="keys" id="keys">enter details · v view agent · s stop · d dismiss · a ask</p>
         </aside>
       </div>
 
       <div class="prompt" aria-hidden="true"><span class="caret">&gt;</span> <span class="cursor">_</span></div>
       <div class="status" id="status" aria-label="Status line"></div>
+      <div class="toasts" id="toasts"></div>
     </div>
     <p class="sr" aria-live="polite" id="announce"></p>
+    <div class="winstack" id="winstack"></div>
 
-    <div class="notes">
-      <div>
-        <h2>Where the numbers come from</h2>
-        <p>Each script overwrites one line in <code>.claude/progress/&lt;name&gt;-&lt;pid&gt;.txt</code>, such as <code>7 12 compiling assets</code>. Its exit trap writes <code>done 0</code>, or <code>done</code> with the exit code.</p>
-      </div>
-      <div>
-        <h2>No step count</h2>
-        <p>A script that writes <code>0 0</code> gets a spinner and elapsed time instead of a bar, like sync-fixtures.sh here.</p>
-      </div>
-      <div>
-        <h2>Narrow windows</h2>
-        <p>Below the pane's width the terminal does not draw it, so the same mod writes the summary to the status line. <code>/progress</code> opens the pane at any width.</p>
-      </div>
-    </div>
+    <section class="proposals" aria-labelledby="proposals-h">
+      <h2 id="proposals-h">Proposals</h2>
+      <ol class="plist">
+        <li><div class="item"><div>
+          <h3>Session pane</h3>
+          <p>The pane follows the session as well as the scripts: the tool Claude is running now, the last few it ran, its subagents, and how full the context and the five-hour limit are. Uses the <code>tool.call</code>, <code>turn.start</code> and <code>turn.complete</code> hooks, <code>$.agent.list()</code>, <code>$.ui.view</code> and <code>$.session.usage()</code>.</p>
+        </div><button type="button" class="btn" data-demo="session" aria-label="Show session pane">Show</button></div></li>
+        <li><div class="item"><div>
+          <h3>Rows that expand</h3>
+          <p>Each job row is a button. Press it to open the file path, pid, start time and exit code under the row. Uses <code>Button</code> with <code>onPress</code>.</p>
+        </div><button type="button" class="btn" data-demo="1" aria-label="Show rows that expand">Show</button></div></li>
+        <li><div class="item"><div>
+          <h3>Dismiss</h3>
+          <p>Remove a stalled or finished row. The pane count says how many are hidden and brings them back. Uses <code>$.store</code>.</p>
+        </div><button type="button" class="btn" data-demo="2" aria-label="Show dismiss">Show</button></div></li>
+        <li><div class="item"><div>
+          <h3>Notifications</h3>
+          <p>A toast in the terminal when a job finishes, and a system notification when one fails or runs for more than 2 minutes. Uses <code>$.ui.toast</code> and <code>$.ui.notify</code>.</p>
+        </div><button type="button" class="btn" data-demo="3" aria-label="Show notifications">Show</button></div></li>
+        <li><div class="item"><div>
+          <h3>Ask Claude</h3>
+          <p>A failed row sends its last output to Claude as a prompt, and the conversation carries on from there. Uses <code>$.prompt.submit</code>.</p>
+        </div><button type="button" class="btn" data-demo="4" aria-label="Show ask Claude">Show</button></div></li>
+        <li><div class="item"><div>
+          <h3>Time remaining</h3>
+          <p>After three steps, the average time per step gives an estimate beside the elapsed time. No mod API call: the poll already sees every change.</p>
+        </div><button type="button" class="btn" data-demo="5" aria-label="Show time remaining">Show</button></div></li>
+        <li><div class="item"><div>
+          <h3>Last lines of output</h3>
+          <p>The details show the job's last few lines. Uses a second file per job, written by the helpers: <code>&lt;script&gt;-&lt;pid&gt;.log</code>.</p>
+        </div><button type="button" class="btn" data-demo="6" aria-label="Show last lines of output">Show</button></div></li>
+        <li><div class="item"><div>
+          <h3>Stop</h3>
+          <p>End a running job from its row, after a confirmation that names the job and its pid. Uses <code>$.process.run</code>.</p>
+        </div><button type="button" class="btn" data-demo="7" aria-label="Show stop">Show</button></div></li>
+      </ol>
+      <p class="gap">Not shown: shells Claude starts in the background. The <code>tool.call</code> hook sees one start, but the call returns at once, so the pane would not see it end. That needs testing before the pane promises it.</p>
+      <p class="facts">While a script runs, its file holds one line, <code>&lt;startedEpochSec&gt; &lt;step&gt; &lt;total&gt; &lt;label...&gt;</code>, in <code>.claude/progress/&lt;script&gt;-&lt;pid&gt;.txt</code>. When it finishes the line becomes <code>&lt;startedEpochSec&gt; done &lt;exitCode&gt; &lt;endedEpochSec&gt;</code>. A script with no step count writes a total of 0 and gets a spinner and elapsed time instead of a bar, like sync-fixtures.sh here. In a terminal narrower than 144 columns the pane does not open by itself, which leaves the status line, written at every width; <code>/progress</code> opens the pane at any width.</p>
+    </section>
   </main>
 </div>
 
@@ -255,145 +441,796 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 
   const BUILD = ["cleaning out/", "resolving packages", "generating types", "compiling core", "compiling cli", "compiling server",
     "compiling assets", "bundling client", "minifying", "hashing files", "writing manifest", "copying to dist/"];
-  const TESTS = ["tests/unit", "tests/api", "tests/db", "tests/integration"];
+  const BUILD_DETAIL = {
+    8: "  dist/assets/app.3f9c1a.js  182.4 kB",
+    9: "  app.3f9c1a.js  182.4 kB to 61.8 kB",
+    10: "  hashed 38 files",
+    11: "  wrote dist/manifest.json",
+    12: "  copied 41 files to dist/",
+  };
+  const DIRS = ["tests/unit", "tests/api", "tests/db", "tests/integration"];
+  const FILES = ["users.json", "orders.json", "products.json", "invoices.json", "audit-log.json", "regions.json", "rates.json"];
+
+  const mk = o => Object.assign({
+    status: "running", step: 0, total: 0, elapsed: 0, every: 0, pace: 0, paceN: 3, due: 0, exit: 0, bad: false,
+    finSeq: 0, open: false, confirm: false, asked: false, dismissed: false, copied: null, log: [],
+  }, o, { lastStep: o.elapsed, due: o.every || 0 });
 
   // Sample records for the mockup. Elapsed times are in seconds at the moment the page opens.
-  const seed = () => ({
-    running: [
-      { id: "build", name: "build.sh", step: 7, total: 12, elapsed: 72, every: 2.4, labels: BUILD, exit: 0 },
-      { id: "tests", name: "test-suite.ps1", step: 12, total: 48, elapsed: 48, every: 0.9, labels: TESTS, exit: 0 },
-      { id: "sync", name: "sync-fixtures.sh", step: 0, total: 0, elapsed: 31, every: 3.2, endsAt: 52,
-        files: ["users.json", "orders.json", "products.json", "invoices.json", "audit-log.json", "regions.json", "rates.json"], exit: 0 },
-    ],
-    finished: [
-      { id: "migrate", name: "migrate.sh", text: "failed at 3/7, exit 1", bad: true },
-      { id: "lint", name: "lint.sh", text: "done in 0m 22s", bad: false },
-    ],
-  });
+  const seed = () => [
+    mk({ id: "build", name: "build.sh", pid: 48213, started: "14:02:31", step: 7, total: 12, elapsed: 72, every: 2.4, pace: 2.4,
+      log: ["compiling server", "  src/server/routes.ts", "compiling assets", "  src/assets/icons.ts"] }),
+    mk({ id: "tests", name: "test-suite.ps1", pid: 48307, started: "14:02:55", step: 12, total: 48, elapsed: 48, every: 1.15, pace: 1.15,
+      log: ["  ok  tests/api/case-10", "  ok  tests/api/case-11", "  ok  tests/db/case-12"] }),
+    mk({ id: "sync", name: "sync-fixtures.sh", pid: 48364, started: "14:03:12", elapsed: 31, every: 3.2, endsAt: 52,
+      log: ["fetched users.json", "fetched orders.json", "fetched products.json"] }),
+    mk({ id: "deploy", name: "deploy-preview.sh", pid: 47951, started: "13:49:12", status: "stalled", step: 3, total: 9, elapsed: 250,
+      stalledAfter: 250, fixedLabel: "uploading bundle", log: ["building preview 8f2c1d9", "bundle ready  2.1 MB", "uploading bundle  part 2 of 4"] }),
+    mk({ id: "migrate", name: "migrate.sh", pid: 47866, started: "13:58:10", status: "finished", step: 3, total: 7, elapsed: 41, exit: 1, bad: true, finSeq: 1,
+      errLine: 'ERROR: relation "orders" does not exist', reads: "migrations/0007_orders_index.sql",
+      log: ["connecting to orders_dev", "applying 0007_orders_index.sql", 'ERROR: relation "orders" does not exist', "rolled back 0007"] }),
+    mk({ id: "lint", name: "lint.sh", pid: 48102, started: "14:00:20", status: "finished", step: 4, total: 4, elapsed: 22, finSeq: 0,
+      log: ["checked 212 files", "0 problems"] }),
+  ];
 
-  let state = seed();
+  const jobs = new Map();
   let paused = false;
   let frame = 0;
   let lastTick = performance.now();
-  let due = {};
-  const resetDue = () => { due = {}; state.running.forEach(j => { due[j.id] = j.every; }); };
-  resetDue();
+  let finCounter = 1;
+  let restartIn = null;
+  let gen = 0;
+  let lastStatus = "";
 
   const $ = id => document.getElementById(id);
-  const fmt = s => `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, "0")}s`;
+  const fmt = s => {
+    s = Math.floor(s);
+    return s >= 3600 ? `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`
+      : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+  };
+  const fmtLeft = s => (s < 60 ? `${s}s` : fmt(s));
   const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  const setText = (el, t) => { if (el.textContent !== t) el.textContent = t; };
+  const setHidden = (el, h) => { if (el.hidden !== h) el.hidden = h; };
+  const pathOf = j => `.claude/progress/${j.name}-${j.pid}.txt`;
+  const finText = j => (j.bad ? `failed after ${fmt(j.elapsed)}, exit ${j.exit}` : `done in ${fmt(j.elapsed)}`);
+  const announce = t => { $("announce").textContent = t; };
 
-  function bar(fraction) {
+  function barParts(fraction) {
     const eighths = Math.round(fraction * BAR * 8);
     const full = Math.floor(eighths / 8);
     const part = EIGHTHS[eighths % 8];
     const used = full + (part ? 1 : 0);
-    return `<span class="fill">${"█".repeat(full)}${part}</span><span class="empty">${"░".repeat(BAR - used)}</span>`;
+    return ["█".repeat(full) + part, "░".repeat(BAR - used)];
   }
 
-  function label(job) {
-    if (job.total === 0) return `downloading ${job.files[Math.min(job.files.length - 1, Math.floor(job.elapsed / 3.2) % job.files.length)]}`;
-    if (job.id === "tests") return `running ${job.labels[Math.min(3, Math.floor(job.step / 12))]}`;
-    return job.labels[Math.min(job.labels.length - 1, job.step - 1)];
+  function labelOf(j) {
+    if (j.fixedLabel) return j.fixedLabel;
+    if (j.total === 0) return `downloading ${FILES[Math.floor(j.elapsed / 3.2) % FILES.length]}`;
+    if (j.id === "tests") return `running ${DIRS[Math.min(3, Math.floor(j.step / 12))]}`;
+    return BUILD[Math.min(BUILD.length - 1, j.step - 1)];
   }
 
-  function jobHTML(job) {
-    if (job.total === 0) {
-      const glyph = reduce.matches ? "…" : SPIN[frame % SPIN.length];
-      return `<div class="job" data-id="${job.id}">
-        <div class="row"><span class="name">${esc(job.name)}</span><span class="step">no step count</span></div>
-        <div class="row"><span><span class="spin">${glyph}</span> ${esc(label(job))}</span><span class="step">${fmt(job.elapsed)}</span></div>
+  function pushLog(j, ...lines) {
+    j.log.push(...lines);
+    while (j.log.length > 4) j.log.shift();
+  }
+
+  /* ---------- DOM: one node set per job, created once and updated in place ---------- */
+  function createView(j) {
+    const root = document.createElement("div");
+    root.className = "job";
+    root.dataset.id = j.id;
+    root.innerHTML = `
+      <button type="button" class="row-btn" data-act="toggle" aria-expanded="false" aria-controls="d-${j.id}">
+        <span class="row"><span class="name"></span><span class="r1r"></span></span>
+        <span class="bar" aria-hidden="true"><span class="fill"></span><span class="empty"></span></span>
+        <span class="row r3"><span class="step"><span class="spin" aria-hidden="true"></span><span class="lbl"></span></span><span class="step t3"></span></span>
+      </button>
+      <div class="quick"><button type="button" class="act q-ask" data-act="ask"></button></div>
+      <button type="button" class="act q-dis" data-act="dismiss"></button>
+      <div class="details" id="d-${j.id}" role="group" aria-label="${j.name} details" inert>
+        <div class="details-in"><div class="details-pad">
+          <p class="path"></p>
+          <p class="meta"><span class="m-pid"></span><span class="m-start"></span><span class="m-exit"></span><span class="m-pace"></span></p>
+          <p class="logl"></p>
+          <pre class="log"></pre>
+          <div class="actions">
+            <button type="button" class="act d-copy" data-act="copy"></button>
+            <button type="button" class="act d-stop" data-act="stop"></button>
+            <button type="button" class="act d-dis" data-act="dismiss"></button>
+            <button type="button" class="act d-ask" data-act="ask"></button>
+          </div>
+          <div class="confirm" role="group" aria-label="Confirm stop for ${j.name}">
+            <p class="cq"></p>
+            <div class="actions">
+              <button type="button" class="act stop" data-act="stopyes"></button>
+              <button type="button" class="act" data-act="stopno">Keep running</button>
+            </div>
+          </div>
+        </div></div>
       </div>`;
+    const q = s => root.querySelector(s);
+    const v = {
+      root, btn: q(".row-btn"), name: q(".name"), r1r: q(".r1r"), bar: q(".bar"), fill: q(".fill"), empty: q(".empty"),
+      r3: q(".r3"), spin: q(".spin"), lbl: q(".lbl"), t3: q(".t3"),
+      quick: q(".quick"), qask: q(".q-ask"), qdis: q(".q-dis"),
+      det: q(".details"), path: q(".path"), pid: q(".m-pid"), start: q(".m-start"), exit: q(".m-exit"), pace: q(".m-pace"),
+      logl: q(".logl"), log: q(".log"),
+      copy: q(".d-copy"), stop: q(".d-stop"), dis: q(".d-dis"), ask: q(".d-ask"),
+      confirm: q(".confirm"), cq: q(".cq"), yes: q('[data-act="stopyes"]'), no: q('[data-act="stopno"]'),
+    };
+    setText(v.name, j.name);
+    setText(v.path, pathOf(j));
+    setText(v.pid, `pid ${j.pid}`);
+    setText(v.start, `started ${j.started}`);
+    setText(v.logl, `last output (${j.name}-${j.pid}.log)`);
+    setText(v.stop, `Stop ${j.name}`);
+    setText(v.dis, `Dismiss ${j.name}`);
+    setText(v.qdis, `Dismiss ${j.name}`);
+    setText(v.cq, `Stop ${j.name} (pid ${j.pid})?`);
+    setText(v.yes, `Stop ${j.name}`);
+    root.addEventListener("animationend", e => { if (e.target === root) root.classList.remove("enter"); });
+    j.v = v;
+    return v;
+  }
+
+  function updateJob(j) {
+    const v = j.v;
+    const fin = j.status === "finished", stalled = j.status === "stalled", running = j.status === "running", stepped = j.total > 0;
+    v.root.classList.toggle("finished", fin);
+    v.root.classList.toggle("stalled", stalled);
+    setHidden(v.root, j.dismissed);
+    v.btn.setAttribute("aria-expanded", String(j.open));
+    if (v.wasOpen !== j.open) {
+      v.wasOpen = j.open;
+      v.det.toggleAttribute("data-open", j.open);
+      v.det.inert = !j.open;
+      // Expanding runs height and opacity for 200 ms; collapsing is immediate.
+      if (j.open && !reduce.matches && v.det.animate) {
+        v.det.animate([{ height: "0px", opacity: 0 }, { height: `${v.det.scrollHeight}px`, opacity: 1 }], { duration: 200, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
+      }
     }
-    const pct = Math.round((job.step / job.total) * 100);
-    return `<div class="job" data-id="${job.id}">
-      <div class="row"><span class="name">${esc(job.name)}</span><span>${job.step}/${job.total}  ${String(pct).padStart(3, " ")}%</span></div>
-      <span class="bar" role="progressbar" aria-label="${esc(job.name)}" aria-valuemin="0" aria-valuemax="${job.total}" aria-valuenow="${job.step}">${bar(job.step / job.total)}</span>
-      <div class="row"><span class="step">${esc(label(job))}</span><span class="step">${fmt(job.elapsed)}</span></div>
-    </div>`;
+
+    // Top row, right side
+    let right;
+    if (fin) right = finText(j);
+    else if (stepped) right = `${j.step}/${j.total}  ${String(Math.round((j.step / j.total) * 100)).padStart(3, " ")}%`;
+    else right = "no step count";
+    setText(v.r1r, right);
+    v.r1r.classList.toggle("bad", fin && j.bad);
+    v.r1r.classList.toggle("ok", fin && !j.bad);
+    v.r1r.classList.toggle("step", !fin && !stepped);
+
+    // Bar and third row
+    setHidden(v.bar, fin || !stepped);
+    if (stepped && !fin) {
+      const [f, e] = barParts(j.step / j.total);
+      setText(v.fill, f);
+      setText(v.empty, e);
+    }
+    setHidden(v.r3, fin);
+    if (!fin) {
+      setHidden(v.spin, stepped);
+      if (!stepped) setText(v.spin, (reduce.matches ? "…" : SPIN[frame % SPIN.length]) + " ");
+      setText(v.lbl, labelOf(j));
+      let t3;
+      if (stalled) t3 = `stalled after ${fmt(j.stalledAfter)}`;
+      else if (stepped && j.step >= 3) {
+        const left = Math.max(5, Math.round((j.pace * (j.total - j.step)) / 5) * 5);
+        t3 = `${fmt(j.elapsed)} · about ${fmtLeft(left)} left`;
+      } else t3 = fmt(j.elapsed);
+      setText(v.t3, t3);
+      v.t3.classList.toggle("stalled", stalled);
+    }
+
+    // Details
+    setHidden(v.exit, !fin);
+    setText(v.exit, `exit ${j.exit}`);
+    const showPace = running && stepped && j.step >= 3;
+    setHidden(v.pace, !showPace);
+    if (showPace) setText(v.pace, `about ${j.pace.toFixed(1)} s per step`);
+    setText(v.log, j.log.join("\n"));
+    setText(v.copy, j.copied ?? "Copy path");
+    setHidden(v.stop, !(running && !j.confirm));
+    setHidden(v.confirm, !(running && j.confirm));
+    setHidden(v.dis, !(stalled || fin));
+    setHidden(v.ask, !(fin && j.bad));
+    const askText = j.asked ? "Asked Claude" : `Ask Claude about ${j.name}`;
+    setText(v.ask, askText);
+    setText(v.qask, askText);
+    v.ask.disabled = j.asked;
+    v.qask.disabled = j.asked;
+    setHidden(v.qask, !(fin && j.bad && !j.open));
+    setHidden(v.quick, !(fin && j.bad && !j.open));
+    setHidden(v.qdis, !(fin && !j.open));
   }
 
-  function finishedHTML(job, fresh) {
-    return `<div class="job finished${fresh ? " enter" : ""}" data-id="${job.id}">
-      <div class="row"><span>${esc(job.name)}</span><span class="${job.bad ? "bad" : "ok"}">${esc(job.text)}</span></div>
-    </div>`;
-  }
-
-  function statusHTML() {
-    const narrow = $("term").dataset.cols === "100";
-    const n = state.running.length;
-    const parts = state.running.map(j => {
-      const short = j.name.replace(/\.(sh|ps1)$/, "").replace("test-suite", "tests").replace("sync-fixtures", "sync");
-      if (j.total === 0) return `<span>${short} <b>running</b></span>`;
-      return narrow && j.id === "tests" ? `<span>${short} <b>${j.step}/${j.total}</b></span>` : `<span>${short} <b>${Math.round(j.step / j.total * 100)}%</b></span>`;
+  function arrange(container, list) {
+    list.forEach((j, i) => {
+      if (container.children[i] !== j.v.root) container.insertBefore(j.v.root, container.children[i] || null);
     });
-    const jobs = n === 0 ? "no background jobs" : narrow ? parts.join("") : `${n} job${n === 1 ? "" : "s"} running`;
-    const hint = narrow && n > 0 ? `<span class="hint">/progress opens the pane</span>` : "";
-    return `<span>Opus 5.5</span><span>shell-progress</span><span class="jobs">${jobs}</span>${hint}`;
   }
 
-  let freshId = null;
+  // Moving a node can drop focus, so put it back on the same element afterwards.
+  function place() {
+    const active = document.activeElement;
+    const all = [...jobs.values()];
+    arrange($("running"), all.filter(j => j.status !== "finished"));
+    arrange($("finished"), all.filter(j => j.status === "finished").sort((a, b) => b.finSeq - a.finSeq));
+    if (active && active !== document.body && active !== document.activeElement && document.contains(active)) active.focus({ preventScroll: true });
+  }
+
+  const shortName = n => n.replace(/\.(sh|ps1)$/, "").replace("test-suite", "tests").replace("sync-fixtures", "sync");
+
+  function updateSummary() {
+    const all = [...jobs.values()];
+    const vis = all.filter(j => !j.dismissed);
+    const active = vis.filter(j => j.status !== "finished");
+    const running = active.filter(j => j.status === "running").length;
+    const stalledN = active.length - running;
+    const hiddenN = all.length - vis.length;
+
+    const bits = [];
+    if (running) bits.push(`${running} running`);
+    if (stalledN) bits.push(`${stalledN} stalled`);
+    setText($("count"), (bits.length ? bits.join(" · ") : "all finished") + (hiddenN ? " · " : ""));
+    setHidden($("unhide"), hiddenN === 0);
+    setText($("unhide"), `${hiddenN} hidden`);
+    setHidden($("finished-label"), !vis.some(j => j.status === "finished"));
+    setHidden($("nojobs"), vis.length > 0);
+
+    const narrow = $("term").dataset.cols === "100";
+    const part = j => {
+      const s = shortName(j.name);
+      if (j.status === "stalled") return `${s} <b class="stall">stalled</b>`;
+      if (j.total === 0) return `${s} <b>running</b>`;
+      return `${s} <b>${Math.round((j.step / j.total) * 100)}%</b>`;
+    };
+    // The mod writes the same summary at every width, and clears it once no job runs or stalls.
+    const named = active.slice(0, 2).map(part);
+    const more = active.length - named.length;
+    const jobsText = named.join(" · ") + (more > 0 ? ` · ${more} more` : "");
+    const summary = active.length > 0 ? `<span class="jobs">${jobsText}</span>` : "";
+    const hint = narrow && active.length > 0 ? `<span class="hint">/progress opens the pane</span>` : "";
+    const html = `<span>Opus 5.5</span><span>shell-progress</span>${summary}${hint}`;
+    if (html !== lastStatus) { $("status").innerHTML = html; lastStatus = html; }
+  }
+
   function render() {
-    $("running").innerHTML = state.running.map(jobHTML).join("");
-    $("finished").innerHTML = state.finished.map(j => finishedHTML(j, j.id === freshId)).join("");
-    freshId = null;
-    const n = state.running.length;
-    $("count").textContent = n === 0 ? "all finished" : `${n} running`;
-    $("status").innerHTML = statusHTML();
+    jobs.forEach(updateJob);
+    updateSummary();
+    renderSession();
   }
 
-  function note(html) {
+  /* ---------- Transcript ---------- */
+  function addLine(html, cls) {
+    const t = $("transcript");
+    const nearEnd = t.scrollHeight - t.scrollTop - t.clientHeight < 48;
     const p = document.createElement("p");
-    p.className = "line note enter";
+    p.className = `line dyn enter ${cls || ""}`;
     p.innerHTML = html;
-    $("transcript").appendChild(p);
+    t.appendChild(p);
+    if (nearEnd || cls === "you") t.scrollTop = t.scrollHeight;
+    return p;
   }
 
-  let restartIn = null;
-  function restart() {
-    state = seed();
-    resetDue();
-    restartIn = null;
-    document.querySelectorAll(".line.note").forEach(n => n.remove());
-    render();
+  /* ---------- Toasts and notifications ---------- */
+  const popups = [];
+  function popup(kind, head, body, life) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = kind === "toast" ? "toast" : "winnote";
+    b.innerHTML = `<span class="${kind === "toast" ? "t-head" : "w-head"}">${esc(head)}</span><span>${esc(body)}</span>`;
+    const p = { el: b, life, held: false };
+    const drop = () => { b.remove(); const i = popups.indexOf(p); if (i >= 0) popups.splice(i, 1); };
+    b.addEventListener("click", drop);
+    b.addEventListener("mouseenter", () => { p.held = true; });
+    b.addEventListener("mouseleave", () => { p.held = false; });
+    b.addEventListener("focus", () => { p.held = true; });
+    b.addEventListener("blur", () => { p.held = false; });
+    (kind === "toast" ? $("toasts") : $("winstack")).appendChild(b);
+    popups.push(p);
+  }
+  const toast = body => popup("toast", "shell-progress", body, 4);
+  const winNote = body => popup("win", "Claude Code", body, 6);
+
+  /* ---------- Job life cycle ---------- */
+  function finish(j, exit) {
+    j.status = "finished";
+    j.exit = exit;
+    j.bad = exit !== 0;
+    j.confirm = false;
+    j.finSeq = ++finCounter;
+    const text = finText(j);
+    j.v.root.classList.remove("enter");
+    void j.v.root.offsetWidth;
+    j.v.root.classList.add("enter");
+    addLine(`<span class="${j.bad ? "bad" : "ok"}">●</span> Background task ${esc(j.name)} finished: exit ${j.exit}`, "note");
+    announce(`${j.name} ${text}`);
+    toast(`${j.name} ${text}`);
+    if (j.bad || j.elapsed > 120) winNote(`${j.name} ${text}`);
+    place();
+    if (![...jobs.values()].some(x => x.status === "running")) restartIn = 8;
   }
 
-  function finish(job) {
-    state.running = state.running.filter(j => j !== job);
-    const ok = job.exit === 0;
-    const text = ok ? `done in ${fmt(job.elapsed)}` : `failed at ${job.step}/${job.total}, exit ${job.exit}`;
-    state.finished.unshift({ id: job.id, name: job.name, text, bad: !ok });
-    freshId = job.id;
-    note(`<span class="${ok ? "ok" : "bad"}">●</span> Background task ${esc(job.name)} finished: exit ${job.exit}`);
-    $("announce").textContent = `${job.name} ${text}`;
-    if (state.running.length === 0) restartIn = 8;
+  function advance(j) {
+    if (j.total === 0) {
+      pushLog(j, `fetched ${FILES[Math.floor(j.elapsed / 3.2) % FILES.length]}`);
+      if (j.elapsed >= j.endsAt) finish(j, 0);
+      return;
+    }
+    j.step++;
+    const delta = j.elapsed - j.lastStep;
+    j.pace = (j.pace * j.paceN + delta) / (j.paceN + 1);
+    j.paceN++;
+    j.lastStep = j.elapsed;
+    if (j.id === "build") pushLog(j, BUILD[j.step - 1], ...(BUILD_DETAIL[j.step] ? [BUILD_DETAIL[j.step]] : []));
+    if (j.id === "tests") {
+      if (j.step === 40) {
+        j.errLine = "FAILED tests/integration/case-40: expected 3 rows, got 2";
+        pushLog(j, j.errLine);
+        finish(j, 1);
+        return;
+      }
+      pushLog(j, `  ok  ${DIRS[Math.min(3, Math.floor(j.step / 12))]}/case-${String(j.step).padStart(2, "0")}`);
+    }
+    if (j.step >= j.total) finish(j, 0);
   }
 
-  // One state change per tick, so each can be followed.
   function tick() {
     const now = performance.now();
     const dt = Math.min(0.5, (now - lastTick) / 1000);
     lastTick = now;
-    if (!paused) {
-      frame++;
-      if (restartIn !== null && (restartIn -= dt) <= 0) restart();
-      state.running.forEach(j => { j.elapsed += dt; due[j.id] -= dt; });
-      const ready = state.running.filter(j => due[j.id] <= 0).sort((a, b) => due[a.id] - due[b.id])[0];
-      if (ready) {
-        due[ready.id] = ready.every;
-        if (ready.total === 0) {
-          if (ready.elapsed >= ready.endsAt) finish(ready);
-        } else {
-          ready.step++;
-          if (ready.step >= ready.total) finish(ready);
-        }
-      }
-      render();
+    if (paused) return;
+    frame++;
+    if (restartIn !== null && (restartIn -= dt) <= 0) restart();
+    simTick(dt);
+    const live = [...jobs.values()].filter(j => j.status === "running");
+    live.forEach(j => { j.elapsed += dt; j.due -= dt; });
+    // One state change per tick, so each can be followed.
+    const ready = live.filter(j => j.due <= 0).sort((a, b) => a.due - b.due)[0];
+    if (ready) { ready.due += ready.every; advance(ready); }
+    popups.slice().forEach(p => { if (!p.held && (p.life -= dt) <= 0) p.el.click(); });
+    render();
+  }
+
+  function restart() {
+    gen++;
+    restartIn = null;
+    finCounter = 1;
+    seed().forEach(o => {
+      const old = jobs.get(o.id);
+      if (old) { clearTimeout(old.copyTimer); old.copyTimer = null; Object.assign(old, o); }
+      else { jobs.set(o.id, o); createView(o); }
+    });
+    document.querySelectorAll(".line.dyn:not(.tc)").forEach(n => n.remove());
+    popups.splice(0).forEach(p => p.el.remove());
+    jobs.forEach(j => j.v.root.classList.remove("enter"));
+    place();
+    render();
+  }
+
+  /* ---------- Session pane: scripted tool calls, subagents and gauges ---------- */
+  const MAX_TOOL_LINES = 30;
+  const IDLE_GAP = 6;
+  const CLOCK0 = 14 * 3600 + 3 * 60 + 43;
+  const fmtClock = s => [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map(n => String(n).padStart(2, "0")).join(":");
+
+  // One turn: each call starts `at` seconds into the turn and runs for `dur`. The last call ends at 25 s.
+  const TURN = [
+    { tool: "Read", arg: "docs/migrations.md", at: 1.5, dur: 1, res: "Read 84 lines" },
+    { tool: "Grep", arg: '"orders" in migrations/', at: 4, dur: 1, res: "Found 3 files" },
+    { tool: "Bash", arg: "npm test -- orders", at: 6.5, dur: 6, res: "Exit code 1", bad: true },
+    { tool: "Read", arg: "migrations/0007_orders_index.sql", at: 14, dur: 1, res: "Read 31 lines" },
+    { tool: "Edit", arg: "migrations/0007_orders_index.sql", at: 16.5, dur: 2, res: "Updated with 2 additions" },
+    { tool: "Bash", arg: "npm test -- orders", at: 20, dur: 5, res: "12 tests passed" },
+  ];
+
+  const AGENT_SPECS = [
+    { id: "review-migrations", hex: "a3f9c1", type: "router-expert", startAt: 0, runFor: 40, talk: [
+      { k: "you", text: "Review migrations/ for anything that would fail when 0007 applies" },
+      { k: "tool", tool: "Read", arg: "migrations/0006_orders.sql", res: "Read 52 lines" },
+      { k: "tool", tool: "Grep", arg: '"CREATE INDEX" in migrations/', res: "Found 4 matches" },
+      { k: "say", text: "0007 builds its index before the orders table exists on a fresh database. Move it after 0006." },
+    ] },
+    { id: "find-callers", hex: "7be204", type: "router-scout", startAt: 10, runFor: 25, talk: [
+      { k: "you", text: "Find every caller of the orders index helper" },
+      { k: "tool", tool: "Grep", arg: '"ensure_orders_index" in src/', res: "Found 6 matches" },
+      { k: "tool", tool: "Read", arg: "src/db/orders.ts", res: "Read 118 lines" },
+      { k: "say", text: "6 callers, all in src/db and src/jobs. None pass a schema name." },
+    ] },
+  ];
+  const seedAgents = () => AGENT_SPECS.map(s => ({ ...s, started: fmtClock(CLOCK0 + s.startAt), status: "waiting", elapsed: 0, open: false }));
+
+  const freshSession = () => ({
+    t: 0, phase: "turn", turnT: 0, idleT: 0, next: 0, cur: null, recent: [], fresh: false,
+    ctx: 38, limit: 63, cents: 184, lastTurn: 0,
+  });
+  let S = freshSession();
+  const agents = new Map();
+  const recentRows = [];
+  let viewing = null;
+  let mainView = { top: 0, end: true };
+
+  const agentOf = el => { const r = el.closest(".agent"); return r ? agents.get(r.dataset.id) : null; };
+  const atEnd = t => t.hidden || t.scrollHeight - t.scrollTop - t.clientHeight < 48;
+  const flash = el => { el.classList.remove("enter"); void el.offsetWidth; el.classList.add("enter"); };
+
+  function createRecentRows() {
+    for (let i = 0; i < 3; i++) {
+      const root = document.createElement("div");
+      root.className = "rrow";
+      root.hidden = true;
+      root.innerHTML = `<div class="row"><span><span class="r-tool"></span> <span class="step r-arg"></span></span><span><span class="step r-dur"></span><span class="bad r-bad"></span></span></div>`;
+      root.addEventListener("animationend", e => { if (e.target === root) root.classList.remove("enter"); });
+      $("recent").appendChild(root);
+      const q = s => root.querySelector(s);
+      recentRows.push({ root, tool: q(".r-tool"), arg: q(".r-arg"), dur: q(".r-dur"), bad: q(".r-bad") });
     }
   }
 
+  function createAgentView(a) {
+    const root = document.createElement("div");
+    root.className = "agent";
+    root.dataset.id = a.id;
+    root.hidden = true;
+    root.innerHTML = `
+      <button type="button" class="row-btn" data-act="toggle" aria-expanded="false" aria-controls="d-agent-${a.id}">
+        <span class="row"><span class="name"></span><span class="step"></span></span>
+        <span class="row r3"><span class="step"><span class="spin" aria-hidden="true"></span><span class="st"></span></span><span class="step t3"></span></span>
+      </button>
+      <div class="details" id="d-agent-${a.id}" role="group" aria-label="${a.id} details" inert>
+        <div class="details-in"><div class="details-pad">
+          <p class="meta"><span>agent id ${a.hex}</span><span>type ${a.type}</span><span>started ${a.started}</span></p>
+          <div class="actions"><button type="button" class="act" data-act="view">Open ${a.id} transcript</button></div>
+        </div></div>
+      </div>`;
+    const q = s => root.querySelector(s);
+    a.v = { root, btn: q(".row-btn"), spin: q(".spin"), st: q(".st"), t3: q(".t3"), det: q(".details"), view: q('[data-act="view"]'), last: null, wasOpen: false };
+    setText(q(".name"), a.id);
+    setText(q(".row .step"), a.type);
+    root.addEventListener("animationend", e => { if (e.target === root) root.classList.remove("enter"); });
+    $("agents").appendChild(root);
+  }
+
+  function updateAgent(a) {
+    const v = a.v, started = a.status !== "waiting", running = a.status === "running";
+    setHidden(v.root, !started);
+    if (!started) { v.last = null; return; }
+    if (v.last !== a.status) { v.last = a.status; flash(v.root); }
+    v.root.classList.toggle("done", !running);
+    v.btn.setAttribute("aria-expanded", String(a.open));
+    if (v.wasOpen !== a.open) {
+      v.wasOpen = a.open;
+      v.det.toggleAttribute("data-open", a.open);
+      v.det.inert = !a.open;
+      if (a.open && !reduce.matches && v.det.animate) {
+        v.det.animate([{ height: "0px", opacity: 0 }, { height: `${v.det.scrollHeight}px`, opacity: 1 }], { duration: 200, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
+      }
+    }
+    setHidden(v.spin, !running);
+    if (running) setText(v.spin, (reduce.matches ? "…" : SPIN[frame % SPIN.length]) + " ");
+    setText(v.st, a.status);
+    v.st.classList.toggle("ok", !running);
+    setText(v.t3, fmt(a.elapsed));
+  }
+
+  function setGauge(prefix, pct, right) {
+    const m = $(`${prefix}-m`), f = m.lastElementChild;
+    const w = `inset(0 ${100 - pct}% 0 0)`;
+    if (f.style.clipPath !== w) f.style.clipPath = w;
+    m.classList.toggle("hot", pct >= 80);
+    m.setAttribute("aria-valuenow", String(pct));
+    m.setAttribute("aria-valuetext", right.replace(/\s+/g, " "));
+    setText($(`${prefix}-r`), right);
+  }
+
+  function renderSession() {
+    const s = S, turning = s.phase === "turn";
+    setText($("turn"), turning ? `turn ${fmt(s.turnT)}` : "waiting for you");
+
+    const spin = $("now-spin");
+    $("now").classList.toggle("idle", !turning);
+    setHidden(spin, !turning);
+    if (turning) setText(spin, (reduce.matches ? "…" : SPIN[frame % SPIN.length]) + " ");
+    if (s.cur) {
+      setText($("now-tool"), s.cur.tool);
+      setText($("now-arg"), s.cur.arg);
+      setText($("now-t"), `${Math.floor(s.turnT - s.cur.at)}s`);
+    } else {
+      setText($("now-tool"), "");
+      setText($("now-arg"), turning ? "Thinking" : `Waiting for you · last turn took ${fmt(s.lastTurn)}`);
+      setText($("now-t"), "");
+    }
+
+    recentRows.forEach((r, i) => {
+      const e = s.recent[i];
+      setHidden(r.root, !e);
+      if (!e) return;
+      setText(r.tool, e.tool);
+      setText(r.arg, e.arg);
+      setText(r.dur, `${e.dur}s`);
+      setText(r.bad, e.bad ? " failed" : "");
+    });
+    setHidden($("recent-none"), s.recent.length > 0);
+    if (s.fresh) { s.fresh = false; flash(recentRows[0].root); }
+
+    agents.forEach(updateAgent);
+    setGauge("ctx", s.ctx, `${s.ctx}%  ${s.ctx * 2}k of 200k`);
+    setGauge("lim", s.limit, `${s.limit}%  resets 16:00`);
+    setText($("cost"), `session cost $${(s.cents / 100).toFixed(2)}`);
+  }
+
+  function trimToolLines(t, follow) {
+    const lines = t.querySelectorAll(".line.tc");
+    let n = lines.length;
+    while (n >= MAX_TOOL_LINES) {
+      const before = t.scrollHeight;
+      lines[lines.length - n].remove();
+      n--;
+      if (!follow && !t.hidden) t.scrollTop = Math.max(0, t.scrollTop - (before - t.scrollHeight));
+    }
+  }
+
+  function startCall() {
+    const c = S.cur = { ...TURN[S.next++] };
+    const t = $("transcript");
+    const follow = atEnd(t);
+    trimToolLines(t, follow);
+    c.line = addLine(`<span class="mark">●</span> <span class="tool">${c.tool}</span>(${esc(c.arg)})`, "tc");
+    if (follow && !t.hidden) t.scrollTop = t.scrollHeight;
+    S.ctx = Math.min(100, S.ctx + 1);
+    S.cents += 3;
+  }
+
+  function endCall() {
+    const c = S.cur, t = $("transcript");
+    const follow = atEnd(t);
+    const res = c.bad ? `<span class="bad">${esc(c.res)}</span>` : esc(c.res);
+    c.line.insertAdjacentHTML("beforeend", `<br><span class="sub">  ⎿  ${res}</span>`);
+    if (follow && !t.hidden) t.scrollTop = t.scrollHeight;
+    S.recent.unshift({ tool: c.tool, arg: c.arg, dur: c.dur, bad: !!c.bad });
+    S.recent.length = Math.min(S.recent.length, 3);
+    S.fresh = true;
+    S.cur = null;
+  }
+
+  function endTurn() {
+    S.phase = "idle";
+    S.lastTurn = S.turnT;
+    S.idleT = 0;
+    S.limit = Math.min(100, S.limit + 1);
+  }
+
+  function startTurn() {
+    S.phase = "turn";
+    S.turnT = 0;
+    S.next = 0;
+    S.cur = null;
+  }
+
+  function stepAgents() {
+    agents.forEach(a => {
+      if (a.status === "waiting" && S.t >= a.startAt) a.status = "running";
+      if (a.status === "running") {
+        a.elapsed = S.t - a.startAt;
+        if (a.elapsed >= a.runFor) { a.elapsed = a.runFor; a.status = "completed"; }
+      }
+    });
+  }
+
+  function simTick(dt) {
+    S.t += dt;
+    stepAgents();
+    if (S.phase === "idle") {
+      S.idleT += dt;
+      if (S.idleT >= IDLE_GAP) startTurn();
+      return;
+    }
+    S.turnT += dt;
+    if (S.cur && S.turnT >= S.cur.at + S.cur.dur) endCall();
+    if (!S.cur) {
+      if (S.next < TURN.length) { if (S.turnT >= TURN[S.next].at) startCall(); }
+      else endTurn();
+    }
+  }
+
+  function resetSession() {
+    closeView(false);
+    document.querySelectorAll(".line.tc").forEach(n => n.remove());
+    S = freshSession();
+    seedAgents().forEach(o => {
+      const old = agents.get(o.id);
+      if (old) Object.assign(old, o);
+      else { agents.set(o.id, o); createAgentView(o); }
+    });
+    stepAgents();
+    render();
+  }
+
+  const talkLine = l => {
+    if (l.k === "you") return `<p class="line you">&gt; ${esc(l.text)}</p>`;
+    if (l.k === "tool") return `<p class="line"><span class="mark">●</span> <span class="tool">${l.tool}</span>(${esc(l.arg)})<br><span class="sub">  ⎿  ${esc(l.res)}</span></p>`;
+    return `<p class="line"><span class="mark">●</span> ${esc(l.text)}</p>`;
+  };
+
+  function openView(a) {
+    if (viewing) return;
+    const t = $("transcript");
+    mainView = { top: t.scrollTop, end: atEnd(t) };
+    setText($("subtitle"), `Subagent ${a.id} · ${a.type}`);
+    $("subbody").innerHTML = a.talk.map(talkLine).join("");
+    viewing = a;
+    t.hidden = true;
+    $("subview").hidden = false;
+    $("subview").scrollTop = 0;
+    $("back").focus();
+    announce(`Showing the ${a.id} transcript`);
+  }
+
+  function closeView(focus) {
+    if (!viewing) return;
+    const a = viewing, t = $("transcript");
+    viewing = null;
+    $("subview").hidden = true;
+    t.hidden = false;
+    t.scrollTop = mainView.end ? t.scrollHeight : mainView.top;
+    if (focus) (a.open ? a.v.view : a.v.btn).focus();
+    announce("Back in the main conversation");
+  }
+
+  function setAgentOpen(a, open) {
+    if (!open && a.v.det.contains(document.activeElement)) a.v.btn.focus();
+    a.open = open;
+    render();
+  }
+
+  /* ---------- Actions ---------- */
+  function setOpen(j, open) {
+    if (!open && j.v.det.contains(document.activeElement)) j.v.btn.focus();
+    j.open = open;
+    if (!open) j.confirm = false;
+    render();
+  }
+
+  function dismiss(j) {
+    if (j.dismissed) return;
+    if (j.status === "running") { announce(`${j.name} is still running`); return; }
+    const hadFocus = j.v.root.contains(document.activeElement);
+    const visible = () => [...document.querySelectorAll("#pane .job:not([hidden]) .row-btn")];
+    const idx = visible().indexOf(j.v.btn);
+    j.dismissed = true;
+    j.open = false;
+    j.confirm = false;
+    render();
+    if (hadFocus) {
+      const rest = visible();
+      (rest[Math.min(idx, rest.length - 1)] || $("unhide")).focus();
+    }
+    announce(`${j.name} dismissed`);
+  }
+
+  function unhideAll() {
+    const back = [...jobs.values()].filter(j => j.dismissed);
+    back.forEach(j => { j.dismissed = false; });
+    render();
+    if (back[0]) back[0].v.btn.focus();
+    announce(`${back.length} hidden row${back.length === 1 ? "" : "s"} shown`);
+  }
+
+  function ask(j) {
+    if (j.status !== "finished" || !j.bad || j.asked) return;
+    j.asked = true;
+    const wasOnAsk = j.v.root.contains(document.activeElement) && document.activeElement.dataset.act === "ask";
+    const last = j.errLine || j.log[j.log.length - 1];
+    addLine(`&gt; <span class="sub">[shell-progress]</span> ${esc(`${j.name} ${finText(j)}. Its last output: ${last}. Find out why.`)}`, "you");
+    const myGen = gen;
+    setTimeout(() => {
+      if (myGen !== gen) return;
+      addLine(`<span class="mark">●</span> Reading scripts/${esc(j.name)}${j.reads ? ` and ${esc(j.reads)}` : ""}.`);
+      $("transcript").scrollTop = $("transcript").scrollHeight;
+    }, 600);
+    render();
+    if (wasOnAsk) j.v.btn.focus();
+    announce(`Asked Claude about ${j.name}`);
+  }
+
+  // A file: page often has no clipboard access, so the label says which way it went.
+  function copyPath(j) {
+    const show = result => {
+      j.copied = result;
+      clearTimeout(j.copyTimer);
+      j.copyTimer = setTimeout(() => { j.copied = null; render(); }, 1500);
+      render();
+    };
+    let copying;
+    try { copying = navigator.clipboard.writeText(pathOf(j)); } catch (e) { copying = Promise.reject(e); }
+    copying.then(() => show("Path copied"), () => show("Copy failed"));
+  }
+
+  function askStop(j) {
+    if (j.status !== "running") return;
+    j.open = true;
+    j.confirm = true;
+    render();
+    j.v.no.focus({ preventScroll: true });
+  }
+  function cancelStop(j) {
+    j.confirm = false;
+    render();
+    j.v.stop.focus();
+  }
+  function confirmStop(j) {
+    const hadFocus = j.v.root.contains(document.activeElement);
+    j.errLine = "received SIGTERM";
+    pushLog(j, j.errLine);
+    finish(j, 143);
+    render();
+    if (hadFocus) j.v.btn.focus();
+  }
+
+  const jobOf = el => { const r = el.closest(".job"); return r ? jobs.get(r.dataset.id) : null; };
+
+  $("pane").addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.id === "unhide") { unhideAll(); return; }
+    const ag = agentOf(b);
+    if (ag) {
+      if (b.dataset.act === "toggle") setAgentOpen(ag, !ag.open);
+      else if (b.dataset.act === "view") openView(ag);
+      return;
+    }
+    const j = jobOf(b);
+    if (!j) return;
+    switch (b.dataset.act) {
+      case "toggle": setOpen(j, !j.open); break;
+      case "copy": copyPath(j); break;
+      case "stop": askStop(j); break;
+      case "stopyes": confirmStop(j); break;
+      case "stopno": cancelStop(j); break;
+      case "dismiss": dismiss(j); break;
+      case "ask": ask(j); break;
+    }
+  });
+
+  $("pane").addEventListener("keydown", e => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const ag = agentOf(e.target);
+    if (ag) { if (e.key.toLowerCase() === "v") openView(ag); return; }
+    const j = jobOf(e.target);
+    if (!j) return;
+    if (e.key === "Escape") { if (j.confirm) { e.preventDefault(); cancelStop(j); } return; }
+    switch (e.key.toLowerCase()) {
+      case "d": dismiss(j); break;
+      case "s": askStop(j); break;
+      case "a": ask(j); break;
+      case "c": copyPath(j); break;
+    }
+  });
+
+  /* ---------- Page controls ---------- */
+  function setPane(mode) {
+    const session = mode === "session";
+    document.querySelectorAll("button[data-pane]").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.pane === mode)));
+    $("pane").dataset.mode = mode;
+    $("pane").setAttribute("aria-label", session ? "Session pane" : "Background jobs pane");
+    setText($("pane-title"), session ? "This session" : "Background jobs");
+    setText($("keys"), session ? "enter details · v view agent · s stop · d dismiss · a ask" : "enter details · s stop · d dismiss · a ask · c copy");
+    (session ? $("jobs-label") : $("head-right")).appendChild($("jobcount"));
+    if (!session) closeView(false);
+    const url = new URL(location.href);
+    url.searchParams.set("pane", mode);
+    try { history.replaceState(null, "", url); } catch (e) { /* file: URLs may refuse */ }
+    render();
+  }
+  document.querySelectorAll("button[data-pane]").forEach(b => b.addEventListener("click", () => setPane(b.dataset.pane)));
+  $("back").addEventListener("click", () => closeView(true));
+  $("subview").addEventListener("keydown", e => { if (e.key === "Escape") closeView(true); });
+
   function setCols(cols) {
-    document.querySelectorAll(".seg button").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.cols === cols)));
+    document.querySelectorAll("button[data-cols]").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.cols === cols)));
     $("term").dataset.cols = cols;
     $("cols").textContent = `${cols} × 34`;
     const url = new URL(location.href);
@@ -401,7 +1238,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     try { history.replaceState(null, "", url); } catch (e) { /* file: URLs may refuse */ }
     render();
   }
-  document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => setCols(b.dataset.cols)));
+  document.querySelectorAll("button[data-cols]").forEach(b => b.addEventListener("click", () => setCols(b.dataset.cols)));
 
   $("pause").addEventListener("click", e => {
     paused = !paused;
@@ -411,9 +1248,53 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 
   $("restart").addEventListener("click", () => {
     restart();
-    $("announce").textContent = "Jobs restarted";
+    resetSession();
+    announce("Simulation restarted");
   });
 
+  /* ---------- "Show" buttons ---------- */
+  const reveal = j => {
+    const behavior = reduce.matches ? "auto" : "smooth";
+    $("term").scrollIntoView({ block: "nearest", behavior });
+    if (j) j.v.root.scrollIntoView({ block: "nearest", behavior });
+  };
+  const needsWide = () => { if ($("term").dataset.cols !== "160") setCols("160"); };
+  const needsBuild = () => { needsWide(); if (jobs.get("build").status !== "running") restart(); return jobs.get("build"); };
+
+  const demos = {
+    session() { setPane("session"); setCols("160"); reveal(null); },
+    1() { needsWide(); const j = jobs.get("build"); j.open = true; render(); reveal(j); },
+    2() {
+      needsWide();
+      const j = jobs.get("deploy");
+      if (j.dismissed) { unhideAll(); setTimeout(() => dismiss(j), 700); } else dismiss(j);
+      reveal(null);
+    },
+    3() { toast("build.sh done in 0m 31s"); winNote("migrate.sh failed after 0m 41s, exit 1"); reveal(null); },
+    4() {
+      needsWide();
+      if (jobs.get("migrate").asked) restart();
+      const j = jobs.get("migrate");
+      if (j.dismissed) { j.dismissed = false; render(); }
+      reveal(j);
+      ask(j);
+    },
+    5() { const j = needsBuild(); j.open = true; render(); reveal(j); },
+    6() { const j = needsBuild(); j.open = true; render(); reveal(j); },
+    7() { const j = needsBuild(); j.open = true; j.confirm = true; render(); reveal(j); },
+  };
+  document.querySelectorAll("[data-demo]").forEach(b => b.addEventListener("click", () => demos[b.dataset.demo]()));
+
+  /* ---------- Start ---------- */
+  seed().forEach(o => { jobs.set(o.id, o); createView(o); });
+  place();
+  createRecentRows();
+  $("ctx-m").firstElementChild.textContent = "░".repeat(BAR);
+  $("ctx-m").lastElementChild.textContent = "█".repeat(BAR);
+  $("lim-m").firstElementChild.textContent = "░".repeat(BAR);
+  $("lim-m").lastElementChild.textContent = "█".repeat(BAR);
+  resetSession();
+  setPane(new URLSearchParams(location.search).get("pane") === "jobs" ? "jobs" : "session");
   setCols(new URLSearchParams(location.search).get("cols") === "100" ? "100" : "160");
   lastTick = performance.now();
   setInterval(tick, 120);

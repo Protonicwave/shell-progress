@@ -9,12 +9,13 @@ const MAX_TRACKED_FILES = 200
 // A progress line is a few dozen bytes; a larger file is not one, so it is
 // marked unreadable without being read.
 const MAX_LINE_BYTES = 4096
-const PROGRESS_FILE_NAME = /^(.+)-\d+\.txt$/
+const PROGRESS_FILE_NAME = /^(.+)-(\d+)\.txt$/
 const READ_FAILED = Symbol('read failed')
 
 type ProgressFile = {
   readonly name: string
   readonly script: string
+  readonly pid: string
   readonly mtimeMs: number
   readonly size: number
 }
@@ -68,9 +69,11 @@ async function listOrEmpty($: EngineInterface, dir: string): Promise<readonly Fs
 function progressFiles(entries: readonly FsEntry[]): readonly ProgressFile[] {
   const files: ProgressFile[] = []
   for (const entry of entries) {
-    const script = PROGRESS_FILE_NAME.exec(entry.name)?.[1]
-    if (entry.kind !== 'file' || script === undefined) continue
-    files.push({ name: entry.name, script, mtimeMs: entry.mtimeMs, size: entry.size })
+    const match = PROGRESS_FILE_NAME.exec(entry.name)
+    const script = match?.[1]
+    const pid = match?.[2]
+    if (entry.kind !== 'file' || script === undefined || pid === undefined) continue
+    files.push({ name: entry.name, script, pid, mtimeMs: entry.mtimeMs, size: entry.size })
   }
   return files.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, MAX_TRACKED_FILES)
 }
@@ -105,19 +108,40 @@ function jobOf(
   known: Job | undefined,
   read: string | typeof READ_FAILED | undefined,
 ): Job | undefined {
-  if (typeof read === 'string') return jobFrom(file, parseProgressLine(read))
+  if (typeof read === 'string') {
+    const line = parseProgressLine(read)
+    return jobFrom(file, line, lastLabelOf(line, known))
+  }
   if (known?.mtimeMs === file.mtimeMs) return known
-  if (file.size > MAX_LINE_BYTES) return jobFrom(file, null)
+  if (file.size > MAX_LINE_BYTES) return jobFrom(file, null, '')
   // Changed since its last read, and that read failed or waits for a later
   // poll: what was shown stays until a read succeeds.
   if (known !== undefined) return known
   // Recorded at this modification time, so it is read again only once it changes.
-  if (read === READ_FAILED) return jobFrom(file, null)
+  if (read === READ_FAILED) return jobFrom(file, null, '')
   return undefined
 }
 
-function jobFrom(file: ProgressFile, line: Job['line']): Job {
-  return { file: file.name, script: file.script, mtimeMs: file.mtimeMs, line }
+function jobFrom(file: ProgressFile, line: Job['line'], lastLabel: string): Job {
+  return {
+    file: file.name,
+    script: file.script,
+    pid: file.pid,
+    mtimeMs: file.mtimeMs,
+    line,
+    lastLabel,
+  }
+}
+
+/**
+ * A running line's own label; otherwise the label `known` held for the same
+ * run, since a finished line carries none. A file reused by a later run, or
+ * one that no longer parses, starts over with none.
+ */
+function lastLabelOf(line: Job['line'], known: Job | undefined): string {
+  if (line?.kind === 'running') return line.label
+  if (line === null || known === undefined || known.line === null) return ''
+  return known.line.startedSec === line.startedSec ? known.lastLabel : ''
 }
 
 /** Oldest start first, unreadable jobs last, ties by file name, so rows keep their places. */

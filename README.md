@@ -1,7 +1,8 @@
 # shell-progress
 
 Helpers that let a script report its progress, and a Claude Code mod that
-draws a bar per job in a pane beside the chat. There is one helper for Bash and
+draws a bar per job in a pane beside the chat, under the tool Claude is
+running. There is one helper for Bash and
 one for Windows PowerShell 5.1; both write the file format below, and the mod
 reads it.
 
@@ -116,7 +117,8 @@ A script killed before it could write its finished line, by `kill -9`, Task
 Manager or `Stop-Process`, or a PowerShell script with no `finally` block,
 leaves a running file that nothing removes. The mod shows it as stalled, in
 the pane and on the status line, in every session until the file is deleted
-from the progress directory by hand.
+from the progress directory by hand, or until it is dismissed in the pane,
+which takes it off both the pane and the status line in every session.
 
 ## The mod
 
@@ -125,20 +127,72 @@ same directory the helpers write to: `$CLAUDE_PROGRESS_DIR` when the session
 has it set, otherwise `.claude/progress` under the folder the session started
 in.
 
-The pane lists each running job with a bar, its step and total, its label and
-the time since it started. A job with no step count shows a spinner instead of
-a bar. A running job whose file has not changed for 10 minutes is marked
-stalled, with how long it ran before its file went quiet, which is how a
-script that was killed before it could write its finished line shows. Under a Finished heading come the five newest jobs that
-ended during the session, with how long each took and, for a failure, its exit
-code. A file that does not hold a progress line shows as
-`unreadable progress line`.
+The pane is titled This session. Its first line shows the tool call Claude is
+running, such as `Bash npm test`, with how long it has run, or `Thinking`
+between calls, or once the turn ends, `Waiting for you` and how long the turn
+took. While a turn runs the header shows its time. If the mod is reloaded
+during a turn, that time stops moving until the next turn starts, unless a
+running job keeps the pane redrawing. Below come the jobs, then
+Agents, then Recent: the last three calls, newest first, each with how long it
+took, and in red when it failed. Only the main conversation's calls are shown,
+not a subagent's. A call another mod makes through `$.tool.call` on the main
+conversation is shown as if Claude had made it. A group with nothing in it is
+not drawn.
 
-The pane opens by itself the first time a job starts running in a session, if
-the terminal is at least 144 columns wide. It does not open by itself again in
-that session once closed. `/progress` opens it at any width. While a job runs,
+Agents lists the session's subagents and teammates, newest first, each with its
+task and whether it is running, waiting, completed or failed. Past five, the
+rest are counted. Pressing an agent's task shows its transcript in the main
+view, as the tasks list does; a toast says why when it cannot, for example
+for a teammate that runs in a terminal pane of its own. An agent leaves the
+list when Claude Code stops tracking it, shortly after it ends.
+
+At the foot of the pane, a bar shows how full the context window is, such as
+`38% · 76k of 200k`, and another how much of the five-hour usage limit is
+used and when it resets, such as `63% · resets 16:00`. Either bar takes the
+theme's warning colour from 80%. Below them is the session's cost so far, as
+`/cost` totals it. A figure Claude Code does not have is left out: the context
+bar appears after the session's first response, and the limit bar only on a
+subscription.
+
+Under Jobs, the pane lists each running job with a bar, its step and total, its label and
+the time since it started. From its third step a job also shows about how long
+it has left, from its average time per step so far, until it reaches its last
+step, which can take any time. A job with no step count
+shows a spinner instead of a bar. A running job whose file has not changed for
+10 minutes is marked stalled, with how long it ran before its file went quiet,
+which is how a script that was killed before it could write its finished line
+shows. Under a Finished heading come the five newest jobs that ended during the
+session, with how long each took and, for a failure, its exit code. A file
+that does not hold a progress line shows as `unreadable progress line`.
+
+Pressing a job's name expands its row to the path of its progress file, its
+process id, the time it started and, once finished, its exit code. Pressing it
+again, or another job's name, collapses it. An expanded stalled or finished
+job has a Dismiss button, which hides the job from the pane in this session and
+later ones. The Jobs heading then counts the hidden jobs, and pressing the
+count shows them all again. A later run that writes to the same file name is a
+new job and shows. A dismissed stalled job whose script turns out to be alive
+stays hidden while it runs on and when it finishes.
+
+An expanded failed job also has an Ask Claude button, which sends Claude a
+prompt naming the script, how long it ran, its exit code and the last step it
+reported, and asks why it failed. The last step is the label the script
+wrote, copied as it stands, so anything that can write to the progress
+directory chooses part of that prompt. If Claude is working, the prompt waits for
+the current turn to end. The button then reads Asked Claude for the rest of the
+session, unless the prompt was refused, in which case it returns.
+
+The pane opens by itself when a session starts, if the terminal is at least
+144 columns wide. It does not open by itself again in that session once
+closed. `/progress` opens it at any width. While a job runs,
 the status line under the prompt also names up to two jobs with their
 percentages, such as `build 58% · sync running · 1 more`.
+
+When a job the mod saw running finishes, a toast names it and how it ended,
+such as `build.sh done in 0m 31s`, or counts the jobs when several finish
+together. A job that failed, or ran for at least 2 minutes, also raises a
+system notification through the channel Claude Code's notification settings
+name. A dismissed job raises neither.
 
 To run the mod for one session, start Claude Code from the repository root
 with:
@@ -170,6 +224,9 @@ from the mod's row in the config menu, or in `~/.claude/settings.json`:
   }
 }
 ```
+
+The `notifyMinutes` setting, 2 by default, is how long a successful job must
+run before it raises a notification. It is changed the same way.
 
 ## Tests
 

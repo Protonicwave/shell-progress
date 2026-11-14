@@ -9,6 +9,12 @@
       "title": "Minutes before a job shows as stalled",
       "description": "A running job whose progress file has not changed for this many minutes shows as stalled.",
       "default": 10
+    },
+    "notifyMinutes": {
+      "type": "number",
+      "title": "Minutes before a finished job notifies",
+      "description": "A job that ran at least this many minutes raises a system notification when it finishes. A failed job always does.",
+      "default": 2
     }
   }
 }
