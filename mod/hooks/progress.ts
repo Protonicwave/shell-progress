@@ -229,6 +229,12 @@ export function runKey(job: Job): string | undefined {
   return job.line === null ? undefined : `${job.file}:${job.line.startedSec}`
 }
 
+/** Whether this run of `job` was dismissed. An unreadable job has no run key, so never is. */
+export function isDismissed(job: Job, dismissed: ReadonlySet<string>): boolean {
+  const key = runKey(job)
+  return key !== undefined && dismissed.has(key)
+}
+
 /**
  * Splits jobs for the pane. Running and unreadable jobs are unfinished, in the
  * order given. Of the finished, only those that ended in or after the
@@ -245,10 +251,10 @@ export function shownJobs(
   finished: readonly FinishedJob[]
   hiddenCount: number
 } {
-  const isDismissed = (job: Job) => dismissed.has(runKey(job) ?? '')
-  const shown = splitJobs(jobs.filter(job => !isDismissed(job)), sessionStartedMs)
+  const isHidden = (job: Job) => isDismissed(job, dismissed)
+  const shown = splitJobs(jobs.filter(job => !isHidden(job)), sessionStartedMs)
   const undismissed = splitJobs(jobs, sessionStartedMs)
-  const hiddenCount = [...undismissed.unfinished, ...undismissed.finished].filter(isDismissed).length
+  const hiddenCount = [...undismissed.unfinished, ...undismissed.finished].filter(isHidden).length
   return { ...shown, hiddenCount }
 }
 

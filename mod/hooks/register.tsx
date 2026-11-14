@@ -10,6 +10,7 @@ import {
   askClaudeText,
   runKey,
   finishedSince,
+  isDismissed,
   isStalled,
   isWorthNotifying,
   statusSummary,
@@ -361,7 +362,7 @@ async function pollOnce(
 
   // A dismissed job is gone from everything the poll drives, not only the pane.
   const dismissed = new Set(await read($, dismissedJobs))
-  const shown = current.filter(job => !dismissed.has(runKey(job) ?? ''))
+  const shown = current.filter(job => !isDismissed(job, dismissed))
   const nowMs = await $.clock.now()
   const isAnyLive = shown.some(job => isLive(job, nowMs, stallMs))
   const finished = finishedSince(previous, shown)
