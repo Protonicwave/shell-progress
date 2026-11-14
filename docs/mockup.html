@@ -178,6 +178,8 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .g-figures { white-space: pre; }
 .g-figures.warn, .mach .warn { color: var(--stalled); }
 .mach { grid-column: 2 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--term-dim); }
+.mach .warn { display: block; white-space: normal; }
+.gauge.machine { align-items: start; }
 @container (max-width: 39.9ch) {
   .gauge { grid-template-columns: minmax(0, 1fr) auto; }
   .gauge .meter, .mach { grid-column: 1 / -1; grid-row: 2; }
@@ -294,6 +296,45 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 }
 .winnote .w-head { display: block; font-size: 12px; font-weight: 600; color: var(--win-muted); margin-bottom: 2px; }
 
+/* All proposals: the terminal frozen with every next proposal showing, numbered pins on it, and a key beside it */
+.board { --pin: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s5); align-items: start; }
+.frame { position: relative; }
+.marks { position: absolute; inset: 0; pointer-events: none; }
+.key { display: none; }
+.wrap[data-view="all"] .board { grid-template-columns: minmax(0, 1fr) 15rem; }
+.wrap[data-view="all"] .key { display: block; }
+.wrap[data-view="all"] .live-ctl, .wrap:not([data-view="all"]) .marks { display: none; }
+/* The frame grows to fit the pane; the transcript adds no height of its own and scrolls inside the row. */
+.wrap[data-view="all"] .term { height: auto; }
+.wrap[data-view="all"] .transcript { contain: size; }
+.wrap[data-view="all"] .pane-list { overflow: visible; }
+.wrap[data-view="all"] .recent-part { display: none; }
+.wrap[data-view="all"] .grip { pointer-events: none; }
+.pin {
+  position: absolute; width: var(--pin); height: var(--pin); margin: calc(var(--pin) / -2) 0 0 calc(var(--pin) / -2);
+  border-radius: 50%; background: var(--accent); color: var(--term);
+  font: 650 12px/var(--pin) var(--sans); text-align: center; font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px var(--term);
+  transition: transform 0.15s var(--ease);
+}
+.pin.lit { transform: scale(1.2); }
+.lit-target { outline: 1px dashed var(--accent); outline-offset: 2px; border-radius: 4px; }
+.key h2 { margin: 0 0 var(--s2); font-size: 1rem; line-height: 1.3; font-weight: 650; }
+.key ol { margin: 0; padding: 0; list-style: none; }
+.key a {
+  display: grid; grid-template-columns: var(--pin) minmax(0, 1fr); gap: 0 var(--s3);
+  padding: var(--s2); margin: 0 calc(var(--s2) * -1); border-radius: var(--r-control);
+  color: inherit; text-decoration: none;
+}
+.key a:hover, .key a:focus-visible { background: var(--control); }
+.key .pin { position: static; margin: 2px 0 0; box-shadow: none; grid-row: span 2; }
+.key b { font-weight: 600; font-size: 15px; line-height: 1.35; }
+.key .gist { color: var(--page-muted); font-size: 14px; line-height: 1.4; text-wrap: pretty; }
+.key .off { margin: var(--s3) 0 0; padding-top: var(--s3); border-top: 1px solid var(--page-line); color: var(--page-muted); font-size: 14px; text-wrap: pretty; }
+@media (max-width: 1100px) {
+  .wrap[data-view="all"] .board { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* Proposals: the built list, then the next one */
 .proposals { margin-top: var(--s6); }
 .proposals h2.next { margin-top: var(--s6); }
@@ -318,6 +359,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   .term { height: auto; }
   .screen { grid-template-columns: minmax(0, 1fr); }
   .grip { display: none; }
+  .wrap[data-view="all"] .transcript { contain: none; }
   .toasts { right: var(--s3); }
   .transcript { max-height: 16rem; }
   .pane { border-left: 0; border-top: 1px solid var(--term-line); }
@@ -326,43 +368,52 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 }
 @media (prefers-reduced-motion: reduce) {
   .line.enter, .job.enter, .agent.enter, .rrow.enter, .foot.enter, .footer.enter, .toast, .winnote { animation: none; }
-  .m-fill, .grip::after { transition: none; }
+  .m-fill, .grip::after, .pin { transition: none; }
   .btn:active, .seg button:active { transform: none; }
 }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="wrap" id="wrap" data-view="all">
   <header>
     <div>
       <h1>Session and jobs pane</h1>
-      <p class="lede">The shell-progress mod already draws a bar per job beside the chat and names the running jobs on the status line. This mockup shows a proposed session pane, which follows Claude's work in every chat, and seven features for the job rows. The mod has built all but Last lines of output and Stop. Switch the pane to Jobs only to compare it with the scope the mod had before the session pane. The second list proposes eight more changes, none built yet; set Footer to As now to compare the rows under the prompt with the trimmed version.</p>
+      <p class="lede">The shell-progress mod draws a bar per job beside the chat and names the running jobs on the status line. Of the first proposals below, it has built all but Last lines of output and Stop. The next eight are not built yet. All proposals holds the terminal still with all eight on screen, each numbered to match the key; Live runs the simulation and brings back the controls.</p>
     </div>
     <div class="controls">
       <div class="ctl">
+        <span class="ctl-l" id="view-l">View</span>
+        <div class="seg" role="group" aria-labelledby="view-l">
+          <button type="button" data-view="all" aria-pressed="true">All proposals</button>
+          <button type="button" data-view="live" aria-pressed="false">Live</button>
+        </div>
+      </div>
+      <div class="ctl live-ctl">
         <span class="ctl-l" id="pane-l">Pane</span>
         <div class="seg" role="group" aria-labelledby="pane-l">
           <button type="button" data-pane="session" aria-pressed="true">This session</button>
           <button type="button" data-pane="jobs" aria-pressed="false">Jobs only</button>
         </div>
       </div>
-      <div class="ctl">
+      <div class="ctl live-ctl">
         <span class="ctl-l" id="footer-l">Footer</span>
         <div class="seg" role="group" aria-labelledby="footer-l">
           <button type="button" data-footer="now" aria-pressed="false">As now</button>
           <button type="button" data-footer="trimmed" aria-pressed="true">Trimmed</button>
         </div>
       </div>
-      <div class="seg" role="group" aria-label="Terminal width">
+      <div class="seg live-ctl" role="group" aria-label="Terminal width">
         <button type="button" data-cols="160" aria-pressed="true">160 columns</button>
         <button type="button" data-cols="100" aria-pressed="false">100 columns</button>
       </div>
-      <button type="button" class="btn" id="pause" aria-pressed="false">Pause live updates</button>
-      <button type="button" class="btn" id="restart">Restart simulation</button>
+      <button type="button" class="btn live-ctl" id="pause" aria-pressed="false">Pause live updates</button>
+      <button type="button" class="btn live-ctl" id="restart">Restart simulation</button>
     </div>
   </header>
 
   <main>
+   <div class="board">
+    <div class="frame" id="frame">
     <div class="term" id="term" data-cols="160">
       <div class="titlebar" aria-hidden="true">
         <span class="tab">claude: shell-progress</span>
@@ -404,11 +455,11 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
             <div id="finished"></div>
             <div class="group sess">Agents</div>
             <div class="sess" id="agents"></div>
-            <div class="group sess">Recent</div>
-            <div class="sess" id="recent"><p class="step none" id="recent-none">Nothing finished yet.</p></div>
+            <div class="group sess recent-part">Recent</div>
+            <div class="sess recent-part" id="recent"><p class="step none" id="recent-none">Nothing finished yet.</p></div>
           </div>
           <div class="foot sess" id="foot">
-            <div class="gauge" id="mach-row"><span class="g-label">machine</span><span class="mach" id="mach"></span></div>
+            <div class="gauge machine" id="mach-row"><span class="g-label">machine</span><span class="mach" id="mach"></span></div>
             <div class="gauge">
               <span class="g-label">context</span>
               <span class="meter" id="ctx-m" role="meter" aria-label="Context used" aria-valuemin="0" aria-valuemax="100"><span class="m-empty" aria-hidden="true"></span><span class="m-fill" aria-hidden="true"></span></span>
@@ -436,6 +487,24 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
       <div class="toasts" id="toasts"></div>
       <span class="probe" id="probe" aria-hidden="true">0000000000</span>
     </div>
+    <div class="marks" id="marks" aria-hidden="true"></div>
+    </div>
+
+    <aside class="key" id="key" aria-labelledby="key-h">
+      <h2 id="key-h">Next proposals</h2>
+      <ol>
+        <li><a href="#p-bars"><span class="pin">1</span><b></b><span class="gist">Label, bar and figures share a row.</span></a></li>
+        <li><a href="#p-width"><span class="pin">2</span><b></b><span class="gist">Opens at 48 columns; a width you drag is kept.</span></a></li>
+        <li><a href="#p-footer"><span class="pin">3</span><b></b><span class="gist">The status line keeps one row, and the hint keeps the permission mode.</span></a></li>
+        <li><a href="#p-agents"><span class="pin">4</span><b></b><span class="gist">Time and tokens once an agent finishes.</span></a></li>
+        <li><a href="#p-machine"><span class="pin">5</span><b></b><span class="gist">CPU, GPU and memory while a job runs, with a warning for a held-back CPU or battery.</span></a></li>
+        <li><a href="#p-cpu"><span class="pin">6</span><b></b><span class="gist">A quiet job that is busy is not stalled.</span></a></li>
+        <li><a href="#p-forecast"><span class="pin">7</span><b></b><span class="gist">When the five-hour limit runs out, if that is before it resets.</span></a></li>
+        <li><a href="#p-added"><span class="pin">8</span><b></b><span class="gist">What the last turn added, at the end of the context figures.</span></a></li>
+      </ol>
+      <p class="off">Two states can't share this frame: below 40 columns each bar takes two rows, and with the pane closed the mod's status line carries the usage figures. Live shows both.</p>
+    </aside>
+   </div>
     <p class="sr" aria-live="polite" id="announce"></p>
     <div class="winstack" id="winstack"></div>
 
@@ -478,35 +547,35 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 
       <h2 class="next" id="next-h">Next proposals</h2>
       <ol class="plist">
-        <li><div class="item"><div>
+        <li id="p-bars"><div class="item"><div>
           <h3>Usage bars on one row</h3>
           <p>Each bar shares a row with its label and figures, so the context and five-hour bars take two rows instead of four. The label shortens to <code>5h limit</code> to fit. Below 40 columns each bar drops back to a row of its own: drag the pane narrower to see it. Reads <code>bodyColumns</code> from the Pane props.</p>
         </div><button type="button" class="btn" data-demo="bars" aria-label="Show usage bars on one row">Show</button></div></li>
-        <li><div class="item"><div>
+        <li id="p-width"><div class="item"><div>
           <h3>Starting width</h3>
           <p>The mod asks for 48 columns when it opens the pane, by passing <code>columns</code> to <code>$.ui.open</code>. Claude Code already lets you drag the docked pane to any width from 24 columns to 45% of the terminal, and keeps that width for later sessions; a width you dragged beats the request. Here, drag the pane's left edge, or focus it and press the arrow keys.</p>
         </div><button type="button" class="btn" data-demo="width" aria-label="Show starting width">Show</button></div></li>
-        <li><div class="item"><div>
+        <li id="p-footer"><div class="item"><div>
           <h3>One place for each figure</h3>
           <p>Your status line script drops its second row, whose context, cost and five-hour figures the pane already shows, and moves <code>+318 -8</code> up to the first. The mod adds those figures to its own status line only while the pane is closed, which it knows from <code>isPlaced</code>. The prompt hint keeps the permission mode and loses the two tips, through the <code>PromptHint</code> render hook. The freed row goes to the pane. Compare Footer As now with Trimmed, then try 100 columns.</p>
         </div><button type="button" class="btn" data-demo="footer" aria-label="Show one place for each figure">Show</button></div></li>
-        <li><div class="item"><div>
+        <li id="p-agents"><div class="item"><div>
           <h3>What an agent cost</h3>
           <p>A finished agent shows its time and tokens, such as <code>0m 40s · 65.2k tokens</code>, from the Agent tool's result (<code>totalDurationMs</code>, <code>totalTokens</code>). A running agent shows only its time, because <code>$.agent.list()</code> carries no token count. Claude Code's own list under the prompt shows live tokens, and no mod can hide that list.</p>
         </div><button type="button" class="btn" data-demo="agents" aria-label="Show what an agent cost">Show</button></div></li>
-        <li><div class="item"><div>
+        <li id="p-machine"><div class="item"><div>
           <h3>Machine row</h3>
           <p>While a job runs, a row above the bars shows CPU load, GPU load and free memory, read from Windows performance counters by one <code>typeperf</code> process the mod keeps running under <code>$.process.spawn</code>. It warns when a busy CPU runs below its base speed (<code>% Processor Performance</code> under 100), which is what a temperature reading would have told you, and when the laptop is on battery.</p>
         </div><button type="button" class="btn" data-demo="machine" aria-label="Show machine row">Show</button></div></li>
-        <li><div class="item"><div>
+        <li id="p-cpu"><div class="item"><div>
           <h3>CPU per job</h3>
           <p>Each running job shows the CPU its process tree is using, matched by the pid in its file name through the <code>Process V2</code> counters and walked down through <code>Creating Process ID</code>. A job whose file has gone quiet while its processes stay busy reads as quiet, not stalled, like reindex.sh here. A stalled job whose process has ended says so. Below 40 columns a running job's CPU gives way to its name.</p>
         </div><button type="button" class="btn" data-demo="cpu" aria-label="Show CPU per job">Show</button></div></li>
-        <li><div class="item"><div>
+        <li id="p-forecast"><div class="item"><div>
           <h3>Limit forecast</h3>
           <p>When the last few readings say the five-hour limit runs out before it resets, its figures give the time, such as <code>82% · full by 14:39</code>, in the warning colour. Otherwise they keep the reset time.</p>
         </div><button type="button" class="btn" data-demo="forecast" aria-label="Show limit forecast">Show</button></div></li>
-        <li><div class="item"><div>
+        <li id="p-added"><div class="item"><div>
           <h3>Context added last turn</h3>
           <p>The context figures end with what the last turn added, such as <code>+12k</code>, so a large file read shows up as soon as it lands. The mod takes the difference between the <code>$.session.usage()</code> readings at <code>turn.start</code> and <code>turn.complete</code>.</p>
         </div><button type="button" class="btn" data-demo="added" aria-label="Show context added last turn">Show</button></div></li>
@@ -540,10 +609,12 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   const mk = o => Object.assign({
     status: "running", step: 0, total: 0, elapsed: 0, every: 0, pace: 0, paceN: 3, due: 0, exit: 0, bad: false,
     finSeq: 0, open: false, confirm: false, asked: false, dismissed: false, copied: null, log: [],
-    cpu: 0, cpuBase: 0, quietFor: 0, gone: false,
+    cpu: 0, cpuBase: 0, quietFor: 0, gone: false, offstage: false,
   }, o, { lastStep: o.elapsed, due: o.every || 0 });
   // A running job whose file has not changed for this long, while its processes stay busy, reads as quiet.
   const QUIET_AFTER_SECONDS = 600;
+  // A dismissed job is hidden by the person; an offstage one is left out of the still frame.
+  const isShown = j => !j.dismissed && !j.offstage;
   // CPU at or above this counts as busy, for a quiet job and for the speed warning.
   const BUSY_CPU_PERCENT = 50;
 
@@ -568,6 +639,8 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 
   const jobs = new Map();
   let paused = false;
+  // "all" holds the terminal still with every next proposal showing; "live" runs the simulation.
+  let view = "all";
   let frame = 0;
   let lastTick = performance.now();
   let finCounter = 1;
@@ -673,7 +746,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     const fin = j.status === "finished", stalled = j.status === "stalled", running = j.status === "running", stepped = j.total > 0;
     v.root.classList.toggle("finished", fin);
     v.root.classList.toggle("stalled", stalled);
-    setHidden(v.root, j.dismissed);
+    setHidden(v.root, !isShown(j));
     v.btn.setAttribute("aria-expanded", String(j.open));
     if (v.wasOpen !== j.open) {
       v.wasOpen = j.open;
@@ -762,11 +835,11 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 
   function updateSummary() {
     const all = [...jobs.values()];
-    const vis = all.filter(j => !j.dismissed);
+    const vis = all.filter(isShown);
     const active = vis.filter(j => j.status !== "finished");
     const running = active.filter(j => j.status === "running").length;
     const stalledN = active.length - running;
-    const hiddenN = all.length - vis.length;
+    const hiddenN = all.filter(j => j.dismissed).length;
 
     const bits = [];
     if (running) bits.push(`${running} running`);
@@ -783,6 +856,8 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     updateSummary();
     renderSession();
     renderFooter();
+    // An expanded or dismissed row in the still frame moves the targets under the pins.
+    placeMarks();
   }
 
   /* ---------- Transcript ---------- */
@@ -866,7 +941,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     const now = performance.now();
     const dt = Math.min(0.5, (now - lastTick) / 1000);
     lastTick = now;
-    if (paused) return;
+    if (paused || view === "all") return;
     frame++;
     if (restartIn !== null && (restartIn -= dt) <= 0) restart();
     simTick(dt);
@@ -1031,11 +1106,13 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     const cpu = Math.min(100, Math.round(12 + liveJobs.reduce((sum, j) => sum + j.cpu, 0) * 0.3));
     const gpu = Math.round(4 + 2 * Math.sin(S.t * 0.4));
     const free = (11.2 - 0.4 * liveJobs.length).toFixed(1);
-    let html = `cpu ${cpu}% · gpu ${gpu}% · ${free} GB free`;
+    // Warnings get a line of their own, so a narrow pane cuts the readings, never a warning.
+    const warnings = [];
     // % Processor Performance under 100 means anything only while the CPU is busy.
-    if (S.throttleSecondsLeft > 0 && cpu >= BUSY_CPU_PERCENT) html += ` · <span class="warn">held at 78% speed</span>`;
-    if (S.batterySecondsLeft > 0) html += ` · <span class="warn">battery 41%</span>`;
-    setHTML($("mach"), html);
+    if (S.throttleSecondsLeft > 0 && cpu >= BUSY_CPU_PERCENT) warnings.push("held at 78% speed");
+    if (S.batterySecondsLeft > 0) warnings.push("on battery, 41%");
+    const warnLine = warnings.length ? `<span class="warn">${warnings.join(" · ")}</span>` : "";
+    setHTML($("mach"), `cpu ${cpu}% · gpu ${gpu}% · ${free} GB free${warnLine}`);
   }
 
   function renderSession() {
@@ -1340,7 +1417,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   const shortName = n => n.replace(/\.(sh|ps1)$/, "").replace("test-suite", "tests").replace("sync-fixtures", "sync");
 
   function jobSummary() {
-    const active = [...jobs.values()].filter(j => !j.dismissed && j.status !== "finished");
+    const active = [...jobs.values()].filter(j => isShown(j) && j.status !== "finished");
     const part = j => {
       const s = shortName(j.name);
       if (j.status === "stalled") return `${s} <b class="stall">stalled</b>`;
@@ -1353,7 +1430,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   }
 
   function renderFooter() {
-    const trimmed = footerMode === "trimmed";
+    const trimmed = view === "all" || footerMode === "trimmed";
     const paneShown = $("term").dataset.cols === "160";
     const running = [...agents.values()].filter(a => a.status === "running");
     const diff = `<span class="add">+318</span> <span class="del">-8</span>`;
@@ -1421,7 +1498,9 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   // The width shown is the wanted width held inside the limits the window allows now.
   function fitPane() {
     const max = paneMax();
-    paneCols = Math.max(PANE_MIN_COLUMNS, Math.min(max, paneWanted));
+    // The still frame shows the width the mod asks for, whatever width was dragged in Live.
+    const wanted = view === "all" ? PANE_ASKED_COLUMNS : paneWanted;
+    paneCols = Math.max(PANE_MIN_COLUMNS, Math.min(max, wanted));
     $("term").style.setProperty("--pane-cols", String(paneCols));
     grip.setAttribute("aria-valuemax", String(max));
     grip.setAttribute("aria-valuenow", String(paneCols));
@@ -1560,7 +1639,101 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     forecast() { S.limit = 82; S.limitRate = 30; showInPane($("foot")); },
     added() { showInPane($("foot")); },
   };
-  document.querySelectorAll("[data-demo]").forEach(b => b.addEventListener("click", () => demos[b.dataset.demo]()));
+  document.querySelectorAll("[data-demo]").forEach(b => b.addEventListener("click", () => { if (view === "all") setView("live"); demos[b.dataset.demo](); }));
+
+  /* ---------- All proposals: one still frame with every next proposal on screen ---------- */
+  // Each pin sits on the pane's left border, the terminal's left edge or the terminal's right edge, beside its target.
+  const MARKS = [
+    { target: () => $("ctx-m").parentElement, side: "left" },
+    { target: () => $("pane"), side: "left" },
+    { target: () => $("script-top"), side: "left" },
+    { target: () => agents.get("review-migrations").v.t3, side: "right" },
+    { target: () => $("mach-row"), side: "left" },
+    { target: () => jobs.get("reindex").v.r1r, side: "right" },
+    { target: () => $("lim-r"), side: "right" },
+    { target: () => $("ctx-r"), side: "right" },
+  ];
+  const pins = MARKS.map((m, i) => {
+    const pin = document.createElement("span");
+    pin.className = "pin";
+    pin.textContent = String(i + 1);
+    $("marks").appendChild(pin);
+    return pin;
+  });
+
+  // Half a terminal line, so a pin centres on its target's first line; the pane's pin centres on the pane title.
+  const FIRST_LINE_MIDDLE_PX = 10;
+  const PANE_TITLE_MIDDLE_PX = 22;
+
+  function placeMarks() {
+    if (view !== "all") return;
+    const frameBox = $("frame").getBoundingClientRect(), term = $("term").getBoundingClientRect(), pane = $("pane").getBoundingClientRect();
+    MARKS.forEach((m, i) => {
+      const el = m.target(), r = el.getBoundingClientRect();
+      const x = m.side === "right" ? term.right : ($("pane").contains(el) ? pane.left : term.left);
+      const y = el === $("pane") ? pane.top + PANE_TITLE_MIDDLE_PX : r.top + Math.min(r.height / 2, FIRST_LINE_MIDDLE_PX);
+      pins[i].style.left = `${x - frameBox.left}px`;
+      pins[i].style.top = `${y - frameBox.top}px`;
+    });
+  }
+
+  function lightMark(i, lit) {
+    MARKS[i].target().classList.toggle("lit-target", lit);
+    pins[i].classList.toggle("lit", lit);
+  }
+  const unlightAll = () => MARKS.forEach((m, i) => lightMark(i, false));
+  // Each key entry takes its title from the proposal it links to, and its number from its place in the key.
+  document.querySelectorAll(".key a").forEach((a, i) => {
+    a.querySelector("b").textContent = document.querySelector(`${a.getAttribute("href")} h3`).textContent;
+    a.addEventListener("pointerenter", () => lightMark(i, true));
+    a.addEventListener("pointerleave", () => lightMark(i, false));
+    a.addEventListener("focus", () => lightMark(i, true));
+    a.addEventListener("blur", () => lightMark(i, false));
+    a.addEventListener("click", unlightAll);
+  });
+
+  // Applied to a fresh simulation: the few changes that put every proposal on screen at once.
+  function stageAll() {
+    setPane("session");
+    setCols("160");
+    ["tests", "sync", "migrate", "lint"].forEach(id => { jobs.get(id).offstage = true; });
+    Object.assign(jobs.get("build"), { step: 8, elapsed: 84, cpu: 91 });
+    jobs.get("reindex").cpu = 97;
+    const review = agents.get("review-migrations");
+    Object.assign(review, { status: "completed", elapsed: review.runFor });
+    Object.assign(agents.get("find-callers"), { status: "running", elapsed: 22 });
+    Object.assign(S, {
+      t: 32, phase: "turn", turnT: 31, ctx: 44, addedThousands: 12, limit: 82, limitRate: 30,
+      throttleSecondsLeft: Infinity, batterySecondsLeft: Infinity,
+      cur: { tool: "Bash", arg: "npm test -- orders", at: 27 },
+    });
+    render();
+  }
+
+  // The pane and width chosen in Live, put back when the still frame is left.
+  let liveChoice = null;
+
+  function setView(next, isStart) {
+    if (next === view && !isStart) return;
+    unlightAll();
+    if (next === "all") liveChoice = { pane: $("pane").dataset.mode, cols: $("term").dataset.cols };
+    view = next;
+    $("wrap").dataset.view = next;
+    document.querySelectorAll("button[data-view]").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.view === next)));
+    const url = new URL(location.href);
+    url.searchParams.set("view", next);
+    try { history.replaceState(null, "", url); } catch (e) { /* file: URLs may refuse */ }
+    grip.tabIndex = next === "all" ? -1 : 0;
+    restart();
+    resetSession();
+    if (next === "all") stageAll();
+    else if (liveChoice) { setPane(liveChoice.pane); setCols(liveChoice.cols); }
+    fitPane();
+    placeMarks();
+  }
+  document.querySelectorAll("button[data-view]").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+  new ResizeObserver(placeMarks).observe($("frame"));
+  document.fonts.ready.then(placeMarks);
 
   /* ---------- Start ---------- */
   seed().forEach(o => { jobs.set(o.id, o); createView(o); });
@@ -1580,7 +1753,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   let keptCols = NaN;
   try { keptCols = Number(localStorage.getItem(PANE_KEY)); } catch (e) { /* storage may be blocked */ }
   paneWanted = keptCols >= PANE_MIN_COLUMNS ? Math.round(keptCols) : PANE_ASKED_COLUMNS;
-  fitPane();
+  setView(params.get("view") === "live" ? "live" : "all", true);
   lastTick = performance.now();
   setInterval(tick, 120);
 })();
