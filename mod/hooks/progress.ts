@@ -201,6 +201,12 @@ export function announcementText(jobs: readonly FinishedJob[]): string {
   return `${jobs.length} jobs finished${failed}`
 }
 
+/** The prompt that asks Claude why `job` failed, with the last step it reported. */
+export function askClaudeText(job: FinishedJob): string {
+  const step = job.lastLabel === '' ? '' : ` Its last step was "${job.lastLabel}".`
+  return `The background job ${job.script} ${finishedText(job.line)}.${step} Find out why it failed.`
+}
+
 /** Whether a finished job failed or ran for at least `notifySeconds`. */
 export function isWorthNotifying(job: FinishedJob, notifySeconds: number): boolean {
   return job.line.exitCode !== 0 || job.line.endedSec - job.line.startedSec >= notifySeconds
@@ -211,11 +217,14 @@ export type UnfinishedJob = Job & { readonly line: RunningLine | null }
 export type FinishedJob = Job & { readonly line: FinishedLine }
 
 /**
- * What a dismissal of `job` is kept under: its file and its start, so a later
- * run that reuses the file name, as one given the same process id does, is a
- * new job. `undefined` for an unreadable job, which has no start.
+ * What one run of `job` is known by when it is dismissed or asked about: its
+ * file and its start, so a later run that reuses the file name, as one given
+ * the same process id does, is a new job. `undefined` for an unreadable job,
+ * which has no start.
  */
-export function dismissalKey(job: Job): string | undefined {
+export function runKey(job: FinishedJob): string
+export function runKey(job: Job): string | undefined
+export function runKey(job: Job): string | undefined {
   return job.line === null ? undefined : `${job.file}:${job.line.startedSec}`
 }
 
@@ -223,7 +232,7 @@ export function dismissalKey(job: Job): string | undefined {
  * Splits jobs for the pane. Running and unreadable jobs are unfinished, in the
  * order given. Of the finished, only those that ended in or after the
  * session's first second show, newest first, at most MAX_SHOWN_FINISHED_JOBS.
- * A job whose dismissal key is in `dismissed` is left out, and counted in
+ * A job whose run key is in `dismissed` is left out, and counted in
  * `hiddenCount` if it would otherwise show.
  */
 export function shownJobs(
@@ -235,7 +244,7 @@ export function shownJobs(
   finished: readonly FinishedJob[]
   hiddenCount: number
 } {
-  const isDismissed = (job: Job) => dismissed.has(dismissalKey(job) ?? '')
+  const isDismissed = (job: Job) => dismissed.has(runKey(job) ?? '')
   const shown = splitJobs(jobs.filter(job => !isDismissed(job)), sessionStartedMs)
   const hidden = splitJobs(jobs.filter(isDismissed), sessionStartedMs)
   return { ...shown, hiddenCount: hidden.unfinished.length + hidden.finished.length }

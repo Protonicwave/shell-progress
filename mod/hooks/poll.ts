@@ -108,19 +108,41 @@ function jobOf(
   known: Job | undefined,
   read: string | typeof READ_FAILED | undefined,
 ): Job | undefined {
-  if (typeof read === 'string') return jobFrom(file, parseProgressLine(read))
+  if (typeof read === 'string') {
+    const line = parseProgressLine(read)
+    return jobFrom(file, line, lastLabelOf(line, known))
+  }
   if (known?.mtimeMs === file.mtimeMs) return known
-  if (file.size > MAX_LINE_BYTES) return jobFrom(file, null)
+  if (file.size > MAX_LINE_BYTES) return jobFrom(file, null, '')
   // Changed since its last read, and that read failed or waits for a later
   // poll: what was shown stays until a read succeeds.
   if (known !== undefined) return known
   // Recorded at this modification time, so it is read again only once it changes.
-  if (read === READ_FAILED) return jobFrom(file, null)
+  if (read === READ_FAILED) return jobFrom(file, null, '')
   return undefined
 }
 
-function jobFrom(file: ProgressFile, line: Job['line']): Job {
-  return { file: file.name, script: file.script, pid: file.pid, mtimeMs: file.mtimeMs, line }
+function jobFrom(file: ProgressFile, line: Job['line'], lastLabel: string): Job {
+  return {
+    file: file.name,
+    script: file.script,
+    pid: file.pid,
+    mtimeMs: file.mtimeMs,
+    line,
+    lastLabel,
+  }
+}
+
+/**
+ * A running line's own label; otherwise the label `known` held for the same
+ * run, since a finished line carries none. A file reused by a later run, or
+ * one that no longer parses, starts over with none.
+ */
+function lastLabelOf(line: Job['line'], known: Job | undefined): string {
+  if (line?.kind === 'running') return line.label
+  const isSameRun =
+    line !== null && known?.line !== null && known?.line.startedSec === line.startedSec
+  return isSameRun ? known.lastLabel : ''
 }
 
 /** Oldest start first, unreadable jobs last, ties by file name, so rows keep their places. */

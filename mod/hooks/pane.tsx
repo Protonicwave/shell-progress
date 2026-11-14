@@ -6,12 +6,12 @@ import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
 import {
   MS_PER_SECOND,
   barText,
-  dismissalKey,
   durationText,
   finishedText,
   isStalled,
   remainingSeconds,
   remainingText,
+  runKey,
   shownJobs,
 } from './progress'
 
@@ -40,6 +40,8 @@ type JobActions = {
   readonly toggleJob: (file: string) => Promise<void>
   readonly dismissJob: (key: string) => Promise<void>
   readonly showHiddenJobs: () => Promise<void>
+  /** Sends Claude a prompt about the failed job, and settles before Claude answers. */
+  readonly askClaude: (job: FinishedJob) => Promise<void>
 }
 
 /** What the pane draws at one moment. */
@@ -48,6 +50,8 @@ type PaneView = {
   readonly progressDir: string
   readonly expandedJob: string | null
   readonly dismissedJobs: ReadonlySet<string>
+  /** The run keys of the failed jobs Claude has been asked about. */
+  readonly askedJobs: ReadonlySet<string>
   readonly bodyColumns: number
   readonly nowMs: number
   readonly sessionStartedMs: number
@@ -211,19 +215,23 @@ function nameButton({ Button }: PaneElements, view: PaneView, job: Job) {
 }
 
 /**
- * The lines under an expanded row: the file, the process, and a Dismiss
- * button when `canDismiss` and the job has a start to be dismissed by.
+ * The lines under an expanded row: the file, the process, Ask Claude for a
+ * failed job, and a Dismiss button when `canDismiss` and the job has a start
+ * to be dismissed by.
  */
 function jobDetails(ui: PaneElements, view: PaneView, job: Job, canDismiss: boolean) {
   const { Box, Button, Text } = ui
   const facts = [`pid ${job.pid}`]
   if (job.line !== null) facts.push(`started ${clockTimeText(job.line.startedSec)}`)
   if (job.line?.kind === 'finished') facts.push(`exit ${job.line.exitCode}`)
-  const key = canDismiss ? dismissalKey(job) : undefined
+  const key = canDismiss ? runKey(job) : undefined
   return (
     <Box flexDirection="column" marginLeft={2}>
       <Text dimColor wrap="truncate-start">{`${view.progressDir}/${job.file}`}</Text>
       <Text dimColor>{facts.join(' · ')}</Text>
+      {job.line?.kind === 'finished' &&
+        job.line.exitCode !== 0 &&
+        askClaudeControl(ui, view, { ...job, line: job.line })}
       {key !== undefined && (
         <Button
           key={`dismiss:${job.file}`}
@@ -232,6 +240,18 @@ function jobDetails(ui: PaneElements, view: PaneView, job: Job, canDismiss: bool
         />
       )}
     </Box>
+  )
+}
+
+/** A failed job's Ask Claude button, or `Asked Claude` once pressed. */
+function askClaudeControl({ Button, Text }: PaneElements, view: PaneView, job: FinishedJob) {
+  if (view.askedJobs.has(runKey(job))) return <Text dimColor>Asked Claude</Text>
+  return (
+    <Button
+      key={`ask:${job.file}`}
+      label={`Ask Claude about ${job.script}`}
+      onPress={() => view.actions.askClaude(job)}
+    />
   )
 }
 

@@ -7,7 +7,8 @@ import { PANE_ID, PANE_TITLE, drawPane } from './pane'
 import { POLL_INTERVAL_MS, pollJobs } from './poll'
 import {
   announcementText,
-  dismissalKey,
+  askClaudeText,
+  runKey,
   finishedSince,
   isStalled,
   isWorthNotifying,
@@ -20,14 +21,14 @@ const STUCK_POLL_MS = 30_000
 const MS_PER_MINUTE = 60_000
 const SECONDS_PER_MINUTE = 60
 const DISMISSED_STORE_KEY = 'dismissedJobs'
-// A dismissal key names one run, so an old key never hides a new job; past
+// A run key names one run, so an old key never hides a new job; past
 // this many, the oldest are dropped, which only brings their jobs back.
 const MAX_DISMISSED_JOBS = 200
 
 // Change the tag when Job's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const jobs = atom({ plugin: 'shell-progress', key: 'jobs' } as const, [], {
-  shape: 'jobs-2',
+  shape: 'jobs-3',
 })
 // Set once the pane has opened by itself, so a person who closes it is not
 // shown it again in the same session.
@@ -36,6 +37,8 @@ const expandedJob = atom({ plugin: 'shell-progress', key: 'expandedJob' } as con
 // Loaded from the plugin's store at session start and written back on each
 // change, so a dismissed job stays hidden in later sessions.
 const dismissedJobs = atom({ plugin: 'shell-progress', key: 'dismissedJobs' } as const, [])
+// One key per press of a button that then goes, so it stays small without a cap.
+const askedJobs = atom({ plugin: 'shell-progress', key: 'askedJobs' } as const, [])
 
 export const register: Register = (on, options) => {
   const stallMs = positiveMinutesOf(options, 'stallMinutes') * MS_PER_MINUTE
@@ -61,11 +64,12 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
-    const [jobList, dir, expanded, dismissed, nowMs, usage] = await Promise.all([
+    const [jobList, dir, expanded, dismissed, asked, nowMs, usage] = await Promise.all([
       read($, jobs),
       progressDir($),
       read($, expandedJob),
       read($, dismissedJobs),
+      read($, askedJobs),
       $.clock.now(),
       $.session.usage(),
     ])
@@ -74,6 +78,7 @@ export const register: Register = (on, options) => {
       progressDir: dir,
       expandedJob: expanded,
       dismissedJobs: new Set(dismissed),
+      askedJobs: new Set(asked),
       bodyColumns: e.props.bodyColumns,
       nowMs,
       sessionStartedMs: usage.startedAt,
@@ -93,7 +98,29 @@ function jobActions($: EngineInterface) {
       await changeDismissedJobs($, keys => [...keys.filter(one => one !== key), key])
     },
     showHiddenJobs: () => changeDismissedJobs($, () => []),
+    askClaude: async (job: FinishedJob) => {
+      const key = runKey(job)
+      await update($, askedJobs, keys => [...keys, key])
+      // Not awaited: a prompt sent while Claude works waits for the session to
+      // go idle, and the press should not wait with it.
+      void submitQuestion($, job, key)
+    },
   }
+}
+
+/**
+ * Asks Claude about `job`, and forgets that it was asked if the prompt does
+ * not enter, so its button shows again. Settles without rejecting.
+ */
+async function submitQuestion($: EngineInterface, job: FinishedJob, key: string): Promise<void> {
+  let hasEntered = false
+  try {
+    hasEntered = (await $.prompt.submit({ text: askClaudeText(job) })).drop === undefined
+  } catch (error: unknown) {
+    // Nothing awaits this promise, so the failure is logged here, once.
+    $.ui.log(`shell-progress: cannot ask Claude about ${job.script}: ${errorMessage(error)}`)
+  }
+  if (!hasEntered) await update($, askedJobs, keys => keys.filter(one => one !== key))
 }
 
 async function loadDismissedJobs($: EngineInterface): Promise<void> {
@@ -195,7 +222,7 @@ async function pollOnce(
 
   // A dismissed job is gone from everything the poll drives, not only the pane.
   const dismissed = new Set(await read($, dismissedJobs))
-  const shown = current.filter(job => !dismissed.has(dismissalKey(job) ?? ''))
+  const shown = current.filter(job => !dismissed.has(runKey(job) ?? ''))
   const nowMs = await $.clock.now()
   const isAnyLive = shown.some(job => isLive(job, nowMs, stallMs))
   const finished = finishedSince(previous, shown)

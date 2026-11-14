@@ -3,8 +3,9 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { Job, ProgressLine } from '../types'
 import {
   announcementText,
+  askClaudeText,
   barText,
-  dismissalKey,
+  runKey,
   durationText,
   finishedSince,
   finishedText,
@@ -33,6 +34,7 @@ const job = (script: string, line: ProgressLine | null, mtimeMs = NOW_MS): Job =
   pid: '1',
   mtimeMs,
   line,
+  lastLabel: line?.kind === 'running' ? line.label : '',
 })
 
 describe('parseProgressLine', () => {
@@ -281,13 +283,13 @@ describe('remainingText', () => {
   })
 })
 
-describe('dismissalKey', () => {
+describe('runKey', () => {
   test('names the file and the run, so a later run in the same file is a new job', () => {
-    expect(dismissalKey(job('build.sh', running(1, 2)))).toBe('build.sh-1.txt:1700000000')
+    expect(runKey(job('build.sh', running(1, 2)))).toBe('build.sh-1.txt:1700000000')
   })
 
   test('gives none for an unreadable job', () => {
-    expect(dismissalKey(job('odd.sh', null))).toBeUndefined()
+    expect(runKey(job('odd.sh', null))).toBeUndefined()
   })
 })
 
@@ -334,6 +336,27 @@ describe('announcementText', () => {
   })
 })
 
+describe('askClaudeText', () => {
+  const failedJob = (lastLabel: string): FinishedJob => ({
+    ...job('migrate.sh', null),
+    line: { kind: 'finished', startedSec: 1_700_000_000, exitCode: 2, endedSec: 1_700_000_064 },
+    lastLabel,
+  })
+
+  test('says how the job failed and the last step it reported', () => {
+    expect(askClaudeText(failedJob('applying 0042_users'))).toBe(
+      'The background job migrate.sh failed after 1m 04s, exit 2. ' +
+        'Its last step was "applying 0042_users". Find out why it failed.',
+    )
+  })
+
+  test('leaves out the step when the job reported none', () => {
+    expect(askClaudeText(failedJob(''))).toBe(
+      'The background job migrate.sh failed after 1m 04s, exit 2. Find out why it failed.',
+    )
+  })
+})
+
 describe('isWorthNotifying', () => {
   const finishedJob = (exitCode: number, seconds: number): FinishedJob => ({
     ...job('build.sh', null),
@@ -355,7 +378,7 @@ describe('shownJobs', () => {
   const NONE_DISMISSED = new Set<string>()
   const finished = (script: string, endedSec: number, exitCode = 0): Job =>
     job(script, { kind: 'finished', startedSec: 1_699_999_000, exitCode, endedSec })
-  const keysOf = (...jobs: Job[]) => new Set(jobs.map(one => dismissalKey(one) ?? ''))
+  const keysOf = (...jobs: Job[]) => new Set(jobs.map(one => runKey(one) ?? ''))
 
   test('keeps running and unreadable jobs unfinished, in the order given', () => {
     const jobs = [job('build.sh', running(1, 2)), job('odd.sh', null), job('sync.sh', running(0, 0))]

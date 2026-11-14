@@ -144,6 +144,12 @@ later ones. The pane's header then counts the hidden jobs, and pressing the
 count shows them all again. A later run that writes to the same file name is a
 new job and shows.
 
+An expanded failed job also has an Ask Claude button, which sends Claude a
+prompt naming the script, how long it ran, its exit code and the last step it
+reported, and asks why it failed. If Claude is working, the prompt waits for
+the current turn to end. The button then reads Asked Claude for the rest of the
+session, unless the prompt was refused, in which case it returns.
+
 The pane opens by itself the first time a job starts running in a session, if
 the terminal is at least 144 columns wide. It does not open by itself again in
 that session once closed. `/progress` opens it at any width. While a job runs,

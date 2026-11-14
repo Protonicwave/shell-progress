@@ -28,6 +28,11 @@ export type Job = {
   readonly mtimeMs: number
   /** `null` when the file does not hold a valid progress line. */
   readonly line: ProgressLine | null
+  /**
+   * The label of the last running line read for this run, kept once it
+   * finishes; empty when none was read or it had no label.
+   */
+  readonly lastLabel: string
 }
 
 declare module 'claude-code' {
@@ -37,8 +42,10 @@ declare module 'claude-code' {
       hasOpenedPane: boolean
       /** The file of the job whose row is expanded, or `null` when none is. */
       expandedJob: string | null
-      /** The dismissal keys of the jobs the person dismissed, oldest first. */
+      /** The run keys of the jobs the person dismissed, oldest first. */
       dismissedJobs: readonly string[]
+      /** The run keys of the failed jobs Claude has been asked about in this session. */
+      askedJobs: readonly string[]
     }
   }
 }

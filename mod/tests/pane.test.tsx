@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
+import type { On } from 'claude-code'
 
 import type { FakeFile } from './fake-world'
 import { POLL_MS, START_MS, STARTED_SEC, fakeWorld, runningLine, startSession } from './fake-world'
@@ -407,6 +408,86 @@ test('the store keeps the newest 200 dismissals', async ($, on) => {
   expect(world.store.get('dismissedJobs')).toEqual([
     ...earlier.slice(1),
     `lint.sh-2.txt:${STARTED_SEC}`,
+  ])
+  await ui.unmount()
+})
+
+/** Records each prompt the mod submits, and answers with `drop` when it is set. */
+function fakePrompts(on: On, drop?: string) {
+  const submitted: string[] = []
+  on('prompt.submit', (_, e) => {
+    submitted.push(e.text)
+    return drop === undefined ? { text: e.text } : { drop }
+  })
+  return submitted
+}
+
+/** A session in which `migrate.sh` ran with `label` and then failed, its row expanded. */
+async function failedMigration($: Engine, on: On, label: string, finished = finishedLine(2, 64)) {
+  const files = new Map<string, FakeFile>([
+    ['migrate.sh-5.txt', { text: runningLine(1, 2, label), mtimeMs: START_MS }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS)
+  files.set('migrate.sh-5.txt', { text: finished, mtimeMs: START_MS + 1 })
+  await clock.advance(POLL_MS)
+  const ui = await mountPane($)
+  await ui.press({ key: 'migrate.sh-5.txt' })
+  return { world, ui }
+}
+
+test('Ask Claude submits the failed job once and then reads Asked Claude', async ($, on) => {
+  const submitted = fakePrompts(on)
+  const { ui } = await failedMigration($, on, 'applying 0042_users')
+
+  await ui.press({ key: 'ask:migrate.sh-5.txt' })
+  expect(submitted).toEqual([
+    'The background job migrate.sh failed after 1m 04s, exit 2. ' +
+      'Its last step was "applying 0042_users". Find out why it failed.',
+  ])
+  expect(await ui.find({ type: 'Button', text: /^Ask Claude/ })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: 'Asked Claude' }))?.text).toBe('Asked Claude')
+  await ui.unmount()
+})
+
+test('a job that succeeded has no Ask Claude button', async ($, on) => {
+  const { ui } = await failedMigration($, on, 'applying 0042_users', finishedLine(0, 64))
+  expect(await ui.find({ type: 'Button', text: /^Ask Claude/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a prompt that does not enter brings the Ask Claude button back', async ($, on) => {
+  const submitted = fakePrompts(on, 'a hook refused it')
+  const { ui } = await failedMigration($, on, 'applying 0042_users')
+
+  await ui.press({ key: 'ask:migrate.sh-5.txt' })
+  expect(submitted).toHaveLength(1)
+  expect((await ui.find({ type: 'Button', text: /^Ask Claude/ }))?.text).toBe(
+    'Ask Claude about migrate.sh',
+  )
+  await ui.unmount()
+})
+
+test('a prompt that fails is logged and brings the Ask Claude button back', async ($, on) => {
+  // Nothing answers prompt.submit, so the call rejects.
+  const { world, ui } = await failedMigration($, on, 'applying 0042_users')
+
+  await ui.press({ key: 'ask:migrate.sh-5.txt' })
+  expect(world.logs).toHaveLength(1)
+  expect(world.logs[0]).toMatch(/^shell-progress: cannot ask Claude about migrate\.sh: /)
+  expect(await ui.find({ type: 'Button', text: /^Ask Claude/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a step reported by an earlier run in the same file is not asked about', async ($, on) => {
+  const submitted = fakePrompts(on)
+  const laterRun = `${STARTED_SEC + 100} done 2 ${STARTED_SEC + 164}\n`
+  const { ui } = await failedMigration($, on, 'applying 0042_users', laterRun)
+
+  await ui.press({ key: 'ask:migrate.sh-5.txt' })
+  expect(submitted).toEqual([
+    'The background job migrate.sh failed after 1m 04s, exit 2. Find out why it failed.',
   ])
   await ui.unmount()
 })
