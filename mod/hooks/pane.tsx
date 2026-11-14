@@ -6,11 +6,13 @@ import type {
   Job,
   LimitReading,
   ListedAgent,
+  MachineSample,
   RunningCall,
   SessionTurn,
   ToolCalls,
   TurnContext,
 } from '../types'
+import { isCurrentSample, machineText, machineWarnings } from './machine'
 import { POLL_INTERVAL_MS } from './poll'
 import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
 import {
@@ -43,7 +45,7 @@ const HIGH_USAGE_FRACTION = 0.8
 // From this many body columns each usage bar shares a row with its label and
 // figures; below it the figures would leave the bar too few cells.
 const ONE_ROW_USAGE_MIN_COLUMNS = 40
-// Wide enough for the longest label, `5h limit`.
+// Wide enough for the longest labels, `5h limit` and `machine`.
 const USAGE_LABEL_COLUMNS = 8
 const USAGE_GAP_COLUMNS = 1
 // Columns kept clear to the right of the bar.
@@ -59,6 +61,7 @@ const DONE_COLOUR: Color = 'success'
 const FAILED_COLOUR: Color = 'error'
 const HIGH_USAGE_COLOUR: Color = 'warning'
 const WARNING_FIGURES_COLOUR: Color = 'warning'
+const MACHINE_WARNING_COLOUR: Color = 'warning'
 
 /** The elements the pane draws with, which every surface's table holds. */
 type PaneElements = Pick<Elements['terminal'], 'Box' | 'Button' | 'Text'>
@@ -97,6 +100,8 @@ type PaneView = {
   readonly agents: readonly ListedAgent[]
   /** What each finished agent took, oldest first. */
   readonly agentCosts: readonly AgentCost[]
+  /** The sampler's last reading, or `null` before its first. */
+  readonly machineSample: MachineSample | null
 }
 
 /**
@@ -234,23 +239,63 @@ function recentGroup(ui: PaneElements, calls: readonly EndedCall[]): RenderNode 
 }
 
 /**
- * The context and five-hour bars, each on one row with its label and
- * figures where the pane is wide enough and under them where it is not, then
- * the session's cost.
+ * The machine's readings while a job is still to finish, then the context and
+ * five-hour bars, each on one row with its label and figures where the pane
+ * is wide enough and under them where it is not, then the session's cost.
  */
 function usageGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   const { Box, Text } = ui
+  const isOneRow = view.bodyColumns >= ONE_ROW_USAGE_MIN_COLUMNS
+  const machine = machineRows(ui, view, isOneRow)
   const rows = usageRows(view.usage, view.turnContext.lastAddedTokens, view.limitReadings, view.nowMs)
   const cost = costText(view.usage)
-  if (rows.length === 0 && cost === undefined) return undefined
-  const drawRow =
-    view.bodyColumns >= ONE_ROW_USAGE_MIN_COLUMNS
-      ? oneUsageRow(ui, oneRowBarCells(view.bodyColumns, rows))
-      : (row: UsageRow) => twoUsageRows(ui, barCellsFor(view.bodyColumns), row)
+  if (machine === undefined && rows.length === 0 && cost === undefined) return undefined
+  const drawRow = isOneRow
+    ? oneUsageRow(ui, oneRowBarCells(view.bodyColumns, rows))
+    : (row: UsageRow) => twoUsageRows(ui, barCellsFor(view.bodyColumns), row)
   return (
     <Box flexDirection="column" marginTop={1}>
+      {machine}
       {rows.map(drawRow)}
       {cost !== undefined && <Text dimColor>{cost}</Text>}
+    </Box>
+  )
+}
+
+/**
+ * The `machine` label and readings, lined up with the usage rows, and any
+ * warnings on a row of their own so a narrow pane cuts the readings rather
+ * than a warning. Nothing once the jobs are finished or the reading is old.
+ */
+function machineRows(ui: PaneElements, view: PaneView, isOneRow: boolean): RenderNode | undefined {
+  const { Box, Text } = ui
+  const sample = view.machineSample
+  if (sample === null || !isCurrentSample(sample, view.nowMs)) return undefined
+  if (shownJobs(view.jobs, view.usage.startedAt, view.dismissedJobs).unfinished.length === 0) {
+    return undefined
+  }
+  const label = <Text dimColor>machine</Text>
+  const readings = <Text dimColor wrap="truncate-end">{machineText(sample)}</Text>
+  const warnings = machineWarnings(sample)
+  const indent = isOneRow ? USAGE_LABEL_COLUMNS + USAGE_GAP_COLUMNS : 0
+  return (
+    <Box flexDirection="column">
+      {isOneRow ? (
+        <Box gap={USAGE_GAP_COLUMNS}>
+          <Box width={USAGE_LABEL_COLUMNS} flexShrink={0}>{label}</Box>
+          {readings}
+        </Box>
+      ) : (
+        <Box flexDirection="column">
+          {label}
+          {readings}
+        </Box>
+      )}
+      {warnings.length > 0 && (
+        <Box marginLeft={indent}>
+          <Text color={MACHINE_WARNING_COLOUR}>{warnings.join(' · ')}</Text>
+        </Box>
+      )}
     </Box>
   )
 }

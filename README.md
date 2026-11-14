@@ -170,6 +170,23 @@ least 5 minutes older says the limit fills before it resets, its figures give
 that time in the warning colour instead of the reset, such as
 `82% · full by 14:39`.
 
+While a job is still to finish, a machine row above the bars gives the CPU,
+GPU and free memory, such as `cpu 34% · gpu 5% · 11.2 GB free`, as Task
+Manager counts them: the CPU against its base speed and capped at 100%, the
+GPU as its busiest adapter's 3D engines, and memory in gibibytes, which
+Windows calls GB. A machine without GPU Engine counters has no GPU figure.
+Under the readings, in the warning colour, `held at 78% speed` says a CPU at
+50% or more is running below its base speed, as heat or a power plan holds it
+back, and `on battery, 41%` says the laptop is off mains.
+
+The readings come from `mod/hooks/sampler.ps1`, one Windows PowerShell process
+that reads Windows performance counters every 5 seconds. The mod starts it
+with the first unfinished job and stops it after the last. A reading older
+than 15 seconds is not shown. When the sampler cannot start, as on a machine
+without Windows PowerShell, or exits, or writes a line the mod cannot read,
+the mod logs why, once for a lasting fault, leaves the row out, and starts it
+again at most once a minute while a job runs.
+
 While the pane is closed, waiting for a wider terminal, or behind another
 pane, the same figures follow Claude Code's prompt hint, the line with the
 permission mode, drawn dim: `ctx 38% · 5h 63% · $1.84`. They leave the hint
@@ -281,4 +298,11 @@ start `claude --plugin-dir mod` once after cloning. Then:
 
 ```
 npx -y -p typescript@5.8.3 tsc -p mod
+```
+
+The sampler has a CPU budget of 600 ms a minute, 1% of one core. On Windows,
+this runs it for a minute after its start-up and exits 1 when it uses more:
+
+```
+python tests/measure_sampler.py
 ```

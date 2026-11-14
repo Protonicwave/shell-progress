@@ -1,6 +1,17 @@
 import { expect, mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { AgentInfo, BuiltinToolResults, On, SessionUsage, UiNotifyResult, UiOpenResult, UiPane, UiViewResult } from 'claude-code'
+import type {
+  AgentInfo,
+  BuiltinToolResults,
+  On,
+  ProcessSpawnChunk,
+  ProcessSpawnResult,
+  SessionUsage,
+  UiNotifyResult,
+  UiOpenResult,
+  UiPane,
+  UiViewResult,
+} from 'claude-code'
 
 const DIR = '/work/progress'
 // The engine hands paths on in the platform's form, a drive letter and
@@ -31,8 +42,8 @@ export type FakeFile = { text: string; mtimeMs: number; isUnreadable?: boolean }
 
 /**
  * A progress directory beneath the mod, counting what the mod asks of it,
- * a record of the status line, the panes it opens and what it announces, and
- * the mod's store.
+ * a record of the status line, the panes it opens and what it announces, the
+ * mod's store, and a machine sampler that writes nothing until told to.
  */
 export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
   const world = {
@@ -70,6 +81,7 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     viewResult: {} as UiViewResult,
     /** What each `$.session.usage` answers; a test may change it. */
     usage: { startedAt: START_MS, context: { window: 200_000 }, rateLimits: [] } as SessionUsage,
+    sampler: fakeSampler(on),
   }
   const clock = mock.clock(on, { now: START_MS })
   mock.env(on, { CLAUDE_PROGRESS_DIR: DIR })
@@ -144,6 +156,56 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   return { world, clock }
+}
+
+/**
+ * A child beneath `$.process.spawn`: what each start asked for, how many run,
+ * and what the test has the running one write or exit with.
+ */
+function fakeSampler(on: On) {
+  let wake = () => {}
+  const sampler = {
+    argvs: [] as (readonly string[])[],
+    runningCount: 0,
+    /** Set to make every later start fail, as on a machine without PowerShell. */
+    isMissing: false,
+    pending: [] as ProcessSpawnChunk[],
+    exit: undefined as ProcessSpawnResult | undefined,
+    write(text: string, stream: ProcessSpawnChunk['stream'] = 'stdout') {
+      sampler.pending.push({ stream, text })
+      wake()
+    },
+    end(code: number) {
+      sampler.exit = { code, signal: null }
+      wake()
+    },
+  }
+  on('process.spawn', async function* (_, e, next) {
+    sampler.argvs.push(e.argv)
+    if (sampler.isMissing) return { deny: 'powershell.exe: not found' }
+    sampler.runningCount += 1
+    sampler.exit = undefined
+    // A stop aborts the signal, which must wake a wait as a kill would.
+    next.signal.addEventListener('abort', () => wake())
+    try {
+      while (!next.signal.aborted) {
+        const chunk = sampler.pending.shift()
+        if (chunk !== undefined) {
+          yield chunk
+          continue
+        }
+        if (sampler.exit !== undefined) return { value: sampler.exit }
+        await new Promise<void>(resolve => {
+          wake = resolve
+        })
+      }
+      // Killed: Windows reports it as an exit code, as the engine's types say.
+      return { value: { code: 1, signal: null } }
+    } finally {
+      sampler.runningCount -= 1
+    }
+  })
+  return sampler
 }
 
 export async function mountPane($: Engine) {

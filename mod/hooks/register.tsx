@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
+import type { EngineInterface, On, PluginOptions, ProcessSpawnResult, Register, Timer } from 'claude-code'
 
 import type { Job, ListedAgent, RunningCall, SessionTurn } from '../types'
+import { parseSample, takeLines } from './machine'
 import type { FinishedJob } from './progress'
 import { PANE_COLUMNS, PANE_ID, PANE_TITLE, drawPane } from './pane'
 import { POLL_INTERVAL_MS, pollJobs } from './poll'
@@ -13,6 +14,7 @@ import {
   runKey,
   finishedSince,
   isDismissed,
+  isFinished,
   isStalled,
   isWorthNotifying,
   statusSummary,
@@ -45,6 +47,15 @@ const PANE_REQUEST = { id: PANE_ID, title: PANE_TITLE, columns: PANE_COLUMNS } a
 // `tail` is drawn at the end of the engine's hint, so it brings its own
 // separator.
 const HINT_TAIL_SEPARATOR = ' · '
+// A sampler that could not start, exited or wrote a bad line is started again
+// at most this often, so a machine without Windows PowerShell costs one
+// attempt a minute while a job runs.
+const SAMPLER_RESTART_MS = 60_000
+const SAMPLER_ARGV = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File']
+const SAMPLER_SCRIPT = 'hooks/sampler.ps1'
+// The end of what a failed sampler wrote to stderr goes in its log line,
+// which is where PowerShell names the error.
+const MAX_SAMPLER_ERROR_CHARS = 500
 
 // Change the tag when Job's fields change: it declines what an earlier
 // version stored, which outlives a reload.
@@ -83,6 +94,9 @@ const agentCosts = atom({ plugin: 'shell-progress', key: 'agentCosts' } as const
 // Written only when it changes, so the prompt hint is drawn again once per
 // change rather than once a poll.
 const hintUsage = atom({ plugin: 'shell-progress', key: 'hintUsage' } as const, null)
+const machineSample = atom({ plugin: 'shell-progress', key: 'machineSample' } as const, null, {
+  shape: 'machine-sample-1',
+})
 
 export const register: Register = (on, options) => {
   const stallMs = positiveMinutesOf(options, 'stallMinutes') * SECONDS_PER_MINUTE * MS_PER_SECOND
@@ -123,6 +137,7 @@ export const register: Register = (on, options) => {
       readings,
       agentList,
       costs,
+      sample,
       nowMs,
       usage,
     ] = await Promise.all([
@@ -137,6 +152,7 @@ export const register: Register = (on, options) => {
         read($, limitReadings),
         read($, agents),
         read($, agentCosts),
+        read($, machineSample),
         $.clock.now(),
         $.session.usage(),
       ])
@@ -157,6 +173,7 @@ export const register: Register = (on, options) => {
       limitReadings: readings,
       agents: agentList,
       agentCosts: costs,
+      machineSample: sample,
     })
   })
 
@@ -346,14 +363,16 @@ function startPolling(
   const jobsFailure = failureLog($, `cannot poll ${dir}`)
   const agentsFailure = failureLog($, 'cannot list agents')
   const usageFailure = failureLog($, 'cannot read usage')
+  const sampleWhile = machineSampler($)
   // Separate, so a hung job poll, agent list or usage reading cannot hold up
   // the others.
   const tickJobs = unlessUnsettled($, `a poll of ${dir}`, () =>
-    pollOnce($, dir, stallMs, notifySeconds).then(summary => {
+    pollOnce($, dir, stallMs, notifySeconds).then(polled => {
       jobsFailure.clear()
-      if (summary === shownStatus) return
-      shownStatus = summary
-      $.ui.status(summary)
+      sampleWhile(polled.hasUnfinishedJob, polled.atMs)
+      if (polled.status === shownStatus) return
+      shownStatus = polled.status
+      $.ui.status(polled.status)
     }, jobsFailure.record),
   )
   // On a failure the stored agents stay, so the pane keeps the last list.
@@ -372,6 +391,11 @@ function startPolling(
     tickAgents()
     tickUsage()
   })
+}
+
+function exitText(result: ProcessSpawnResult | undefined): string {
+  if (result === undefined) return 'before it could be read'
+  return result.signal === null ? `with code ${result.code}` : `on ${result.signal}`
 }
 
 /**
@@ -425,12 +449,19 @@ async function pollAgents($: EngineInterface): Promise<void> {
   if (merged !== previous) await update($, agents, () => merged)
 }
 
+/** What one poll of the jobs found: the status line, whether a job is still to finish, and when. */
+type JobsPoll = {
+  readonly status: string | undefined
+  readonly hasUnfinishedJob: boolean
+  readonly atMs: number
+}
+
 async function pollOnce(
   $: EngineInterface,
   dir: string,
   stallMs: number,
   notifySeconds: number,
-): Promise<string | undefined> {
+): Promise<JobsPoll> {
   const previous = await read($, jobs)
   const current = await pollJobs($, dir, previous)
   if (current !== previous) await update($, jobs, () => current)
@@ -447,7 +478,88 @@ async function pollOnce(
   // file changed, so the pane is drawn again while one runs. A stalled job's
   // row does not move, so it alone does not keep the pane redrawing.
   if (isAnyLive) $.ui.invalidate('ui.render')
-  return statusSummary(shown, nowMs, stallMs)
+  return {
+    status: statusSummary(shown, nowMs, stallMs),
+    hasUnfinishedJob: shown.some(job => !isFinished(job)),
+    atMs: nowMs,
+  }
+}
+
+/**
+ * Keeps one sampler running while `isWanted`, storing each reading in
+ * `machineSample`, and stops it when not. A sampler that cannot start, exits
+ * or writes a bad line is logged, once for a lasting fault, and started again
+ * on a later call at most once every SAMPLER_RESTART_MS while it stays wanted.
+ */
+function machineSampler($: EngineInterface): (isWanted: boolean, nowMs: number) => void {
+  const failure = failureLog($, 'cannot sample the machine')
+  let running: SamplerRun | undefined
+  let lastStartMs = Number.NEGATIVE_INFINITY
+  return (isWanted, nowMs) => {
+    if (!isWanted) {
+      running?.stop()
+      running = undefined
+      // The next job starts a sampler at once, even after a failed one.
+      lastStartMs = Number.NEGATIVE_INFINITY
+      return
+    }
+    if (running !== undefined || nowMs - lastStartMs < SAMPLER_RESTART_MS) return
+    lastStartMs = nowMs
+    const run = startSampler($, failure.clear)
+    running = run
+    // Settles without rejecting, so nothing else need wait on it.
+    void run.ended
+      .then(undefined, failure.record)
+      .finally(() => {
+        if (running === run) running = undefined
+      })
+  }
+}
+
+type SamplerRun = {
+  readonly stop: () => void
+  /** Settles once the sampler is stopped; rejects, saying why, when it fails or exits by itself. */
+  readonly ended: Promise<void>
+}
+
+function startSampler($: EngineInterface, onSample: () => void): SamplerRun {
+  const child = $.process.spawn({ argv: [...SAMPLER_ARGV, `${$.plugin.root}/${SAMPLER_SCRIPT}`] })
+  // Rejects when the stream is closed before the child exits, as a stop or a
+  // bad line closes it; neither needs the exit code, so that is not a fault.
+  const exit = child.result.catch(() => undefined)
+  let isStopped = false
+  const ended = (async () => {
+    let rest = ''
+    let errorText = ''
+    for await (const { stream, text } of child) {
+      if (stream === 'stderr') {
+        errorText = `${errorText}${text}`.slice(-MAX_SAMPLER_ERROR_CHARS)
+        continue
+      }
+      const taken = takeLines(rest, text)
+      rest = taken.rest
+      for (const line of taken.lines) {
+        const sample = parseSample(line, await $.clock.now())
+        await update($, machineSample, () => sample)
+        onSample()
+      }
+    }
+    if (isStopped) return
+    // PowerShell spreads an error over several lines; the log takes one.
+    const said = errorText.replace(/\s+/g, ' ').trim()
+    throw new Error(`the sampler exited ${exitText(await exit)}${said === '' ? '' : `: ${said}`}`)
+  })()
+  return {
+    stop: () => {
+      isStopped = true
+      // Ending the stream kills the child, and `ended` settles as the loop
+      // leaves. The value is only what this call resolves with.
+      void child.return({ code: null, signal: null }).then(undefined, (error: unknown) => {
+        $.ui.log(`shell-progress: cannot stop the sampler: ${errorMessage(error)}`)
+      })
+    },
+    ended,
+  }
 }
 
 /**

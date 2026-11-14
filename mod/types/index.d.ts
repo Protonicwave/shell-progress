@@ -104,6 +104,23 @@ export type SessionTurn =
       readonly lastDurationMs: number | null
     }
 
+/** One reading of the machine, as the sampler wrote it. */
+export type MachineSample = {
+  /** When the mod read it. */
+  readonly atMs: number
+  /** Task Manager's CPU figure before its cap: above 100 while the CPU runs above base speed. */
+  readonly cpuPercent: number
+  /** The CPU's speed against its base speed: under 100 when it is held back. */
+  readonly cpuSpeedPercent: number
+  /** The busiest adapter's 3D engines; `null` where Windows has no GPU counters. */
+  readonly gpuPercent: number | null
+  readonly freeMemoryBytes: number
+  readonly power:
+    | { readonly kind: 'mains' }
+    /** `percentLeft` is `null` when Windows does not know the charge. */
+    | { readonly kind: 'battery'; readonly percentLeft: number | null }
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'shell-progress': {
@@ -126,6 +143,8 @@ declare module 'claude-code' {
       agentCosts: Shaped<readonly AgentCost[]>
       /** The usage figures the prompt hint ends with, or `null` while it shows none. */
       hintUsage: string | null
+      /** The sampler's last reading, or `null` before its first. */
+      machineSample: Shaped<MachineSample | null>
     }
   }
 }
