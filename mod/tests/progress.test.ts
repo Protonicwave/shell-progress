@@ -430,6 +430,14 @@ describe('shownJobs', () => {
     expect(shownJobs([old], SESSION_STARTED_MS, keysOf(old)).hiddenCount).toBe(0)
   })
 
+  test('counts only the dismissed jobs that showing them again would bring back', () => {
+    const jobs = [1, 2, 3, 4, 5, 6, 7, 8].map(n => finished(`job${n}.sh`, 1_700_000_000 + n))
+    const oldest = jobs.filter(one => ['job1.sh', 'job2.sh', 'job3.sh'].includes(one.script))
+    expect(shownJobs(jobs, SESSION_STARTED_MS, keysOf(...oldest)).hiddenCount).toBe(0)
+    const newest = jobs.filter(one => one.script === 'job8.sh')
+    expect(shownJobs(jobs, SESSION_STARTED_MS, keysOf(...oldest, ...newest)).hiddenCount).toBe(1)
+  })
+
   test('fills the place of a dismissed finished job with the next newest', () => {
     const jobs = [1, 2, 3, 4, 5, 6].map(n => finished(`job${n}.sh`, 1_700_000_000 + n))
     const dismissed = keysOf(...jobs.filter(one => one.script === 'job6.sh'))

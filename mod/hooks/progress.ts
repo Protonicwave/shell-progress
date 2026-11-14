@@ -234,7 +234,7 @@ export function runKey(job: Job): string | undefined {
  * order given. Of the finished, only those that ended in or after the
  * session's first second show, newest first, at most MAX_SHOWN_FINISHED_JOBS.
  * A job whose run key is in `dismissed` is left out, and counted in
- * `hiddenCount` if it would otherwise show.
+ * `hiddenCount` if it would show with nothing dismissed.
  */
 export function shownJobs(
   jobs: readonly Job[],
@@ -247,8 +247,9 @@ export function shownJobs(
 } {
   const isDismissed = (job: Job) => dismissed.has(runKey(job) ?? '')
   const shown = splitJobs(jobs.filter(job => !isDismissed(job)), sessionStartedMs)
-  const hidden = splitJobs(jobs.filter(isDismissed), sessionStartedMs)
-  return { ...shown, hiddenCount: hidden.unfinished.length + hidden.finished.length }
+  const undismissed = splitJobs(jobs, sessionStartedMs)
+  const hiddenCount = [...undismissed.unfinished, ...undismissed.finished].filter(isDismissed).length
+  return { ...shown, hiddenCount }
 }
 
 function splitJobs(
