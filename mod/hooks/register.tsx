@@ -107,7 +107,7 @@ export const register: Register = (on, options) => {
       askedJobs: new Set(asked),
       bodyColumns: e.props.bodyColumns,
       nowMs,
-      sessionStartedMs: usage.startedAt,
+      usage,
       stallMs,
       actions: paneActions($),
       toolCalls: calls,

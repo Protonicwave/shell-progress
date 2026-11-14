@@ -59,6 +59,8 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     views: [] as (string | undefined)[],
     /** What each `$.ui.view` answers; a test may change it. */
     viewResult: {} as UiViewResult,
+    /** What each `$.session.usage` answers; a test may change it. */
+    usage: { startedAt: START_MS, context: { window: 200_000 }, rateLimits: [] } as SessionUsage,
   }
   const clock = mock.clock(on, { now: START_MS })
   mock.env(on, { CLAUDE_PROGRESS_DIR: DIR })
@@ -90,7 +92,7 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     world.statuses.push(e.text)
     return { value: undefined }
   })
-  on('session.usage', () => ({ value: { startedAt: START_MS } as SessionUsage }))
+  on('session.usage', () => ({ value: world.usage }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('ui.open', (_, e) => {
     world.opens.push(e.id)

@@ -142,6 +142,14 @@ view, as the tasks list does; a toast says why when it cannot, for example
 for a teammate that runs in a terminal pane of its own. An agent leaves the
 list when Claude Code stops tracking it, shortly after it ends.
 
+At the foot of the pane, a bar shows how full the context window is, such as
+`38% · 76k of 200k`, and another how much of the five-hour usage limit is
+used and when it resets, such as `63% · resets 16:00`. Either bar takes the
+theme's warning colour from 80%. Below them is the session's cost so far, as
+`/cost` totals it. A figure Claude Code does not have is left out: the context
+bar appears after the session's first response, and the limit bar only on a
+subscription.
+
 Under Jobs, the pane lists each running job with a bar, its step and total, its label and
 the time since it started. From its third step a job also shows about how long
 it has left, from its average time per step so far. A job with no step count

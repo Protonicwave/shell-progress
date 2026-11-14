@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { AgentInfo, AgentStatus, ToolCallResult } from 'claude-code'
 
-import { POLL_MS, fakeWorld, mountPane, startSession } from './fake-world'
+import { POLL_MS, START_MS, fakeWorld, mountPane, startSession } from './fake-world'
 
 const TURN_ID = 'turn-1'
 
@@ -144,6 +144,48 @@ test('a pane with no jobs, agents or calls draws none of their groups', async ($
   expect(await ui.find({ type: 'Text', text: 'Jobs' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'Agents' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'Recent' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'context' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^session cost/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the usage bars and the cost are drawn from the session\'s figures', async ($, on) => {
+  const { world } = fakeWorld(on, new Map())
+  world.usage = {
+    startedAt: START_MS,
+    context: { tokens: 170_000, window: 200_000, percent: 85 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 40 }],
+    cost: { usd: 1.84 },
+  }
+  await startSession($)
+
+  const ui = await mountPane($)
+  expect((await ui.find({ type: 'Text', text: /^85% · / }))?.text).toBe('85% · 170k of 200k')
+  expect((await ui.find({ type: 'Text', text: /^40%$/ }))?.text).toBe('40%')
+  expect((await ui.find({ type: 'Text', text: /^session cost/ }))?.text).toBe('session cost $1.84')
+  // From 80% a bar turns to the warning colour.
+  const filled = await ui.findAll({ type: 'Text', text: /^[█▏▎▍▌▋▊▉]+$/ })
+  expect(filled.map(bar => [bar.text.length, bar.props['color']])).toEqual([
+    [33, 'warning'],
+    [16, 'claude'],
+  ])
+  await ui.unmount()
+})
+
+test('a figure the session lacks leaves its bar or line out', async ($, on) => {
+  const { world } = fakeWorld(on, new Map())
+  world.usage = {
+    startedAt: START_MS,
+    context: { window: 200_000 },
+    rateLimits: [],
+    cost: { usd: 0 },
+  }
+  await startSession($)
+
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: 'context' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '5-hour limit' })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /^session cost/ }))?.text).toBe('session cost $0.00')
   await ui.unmount()
 })
 

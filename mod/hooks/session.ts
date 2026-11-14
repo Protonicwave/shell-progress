@@ -1,4 +1,4 @@
-import type { AgentInfo } from 'claude-code'
+import type { AgentInfo, SessionUsage } from 'claude-code'
 
 import type { EndedCall, ListedAgent, RunningCall, ToolCalls } from '../types'
 import { MS_PER_SECOND, durationText } from './progress'
@@ -101,4 +101,60 @@ function isSameAgents(left: readonly ListedAgent[], right: readonly ListedAgent[
       )
     })
   )
+}
+
+/** One bar under the pane's groups: what it measures, how full it is, and its figures. */
+export type UsageBar = {
+  readonly label: string
+  /** From 0 to 1; a limit past 100% fills the bar. */
+  readonly fraction: number
+  readonly figures: string
+}
+
+const PERCENT = 100
+const TOKENS_PER_THOUSAND = 1_000
+const TOKENS_PER_MILLION = 1_000_000
+const FIVE_HOUR_LIMIT_KIND = 'five_hour'
+
+/**
+ * The context window's bar and the five-hour limit's, each only when the
+ * session has its reading: none before the first response, and no limit off a
+ * subscription.
+ */
+export function usageBars(usage: SessionUsage): readonly UsageBar[] {
+  const bars: UsageBar[] = []
+  const { tokens, window, percent } = usage.context
+  if (percent !== undefined) {
+    const of = tokens === undefined ? '' : ` · ${tokensText(tokens)} of ${tokensText(window)}`
+    bars.push(usageBar('context', percent, of))
+  }
+  const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
+  if (limit !== undefined) {
+    const resets = limit.resetsAt === undefined ? undefined : new Date(limit.resetsAt)
+    const isValid = resets !== undefined && !Number.isNaN(resets.getTime())
+    // ECMA-262 fixes toTimeString's form as `HH:mm:ss GMT+hhmm (zone)`.
+    const when = isValid ? ` · resets ${resets.toTimeString().slice(0, 5)}` : ''
+    bars.push(usageBar('5-hour limit', limit.percentUsed, when))
+  }
+  return bars
+}
+
+function usageBar(label: string, percent: number, rest: string): UsageBar {
+  return {
+    label,
+    fraction: Math.min(1, Math.max(0, percent / PERCENT)),
+    figures: `${Math.round(percent)}%${rest}`,
+  }
+}
+
+/** `76k`, or `1M` from a million. */
+function tokensText(tokens: number): string {
+  const thousands = Math.round(tokens / TOKENS_PER_THOUSAND)
+  if (thousands < TOKENS_PER_THOUSAND) return `${thousands}k`
+  return `${Number((tokens / TOKENS_PER_MILLION).toFixed(1))}M`
+}
+
+/** `session cost $1.84`, or `undefined` where the host keeps no cost. */
+export function costText(usage: SessionUsage): string | undefined {
+  return usage.cost === undefined ? undefined : `session cost $${usage.cost.usd.toFixed(2)}`
 }

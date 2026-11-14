@@ -1,16 +1,18 @@
 import { describe, expect, test } from 'claude-code/testing'
-import type { AgentInfo, AgentStatus } from 'claude-code'
+import type { AgentInfo, AgentStatus, SessionUsage } from 'claude-code'
 
 import type { EndedCall, RunningCall, ToolCalls } from '../types'
 import {
   NO_TOOL_CALLS,
   RECENT_CALL_COUNT,
+  costText,
   shortDurationText,
   endTurnCalls,
   mergeAgents,
   recordEnd,
   recordStart,
   toolArgumentText,
+  usageBars,
 } from '../hooks/session'
 
 const runningCall = (id: string, startedMs = 0): RunningCall => ({
@@ -151,5 +153,77 @@ describe('mergeAgents', () => {
     const first = mergeAgents([], [agentInfo('a'), agentInfo('b')])
     expect(mergeAgents(first, [agentInfo('b'), agentInfo('a')])).toBe(first)
     expect(mergeAgents([], [])).toEqual([])
+  })
+})
+
+const RESETS_MS = Date.UTC(2026, 10, 14, 16, 0)
+// The reset is shown in local time, so the expected text is worked out here.
+const resetsClock = (() => {
+  const resets = new Date(RESETS_MS)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(resets.getHours())}:${pad(resets.getMinutes())}`
+})()
+
+const usage = (fields: Partial<SessionUsage>): SessionUsage => ({
+  startedAt: 0,
+  context: { window: 200_000 },
+  rateLimits: [],
+  ...fields,
+})
+
+describe('usageBars', () => {
+  test('gives the context and five-hour bars with their figures', () => {
+    const bars = usageBars(
+      usage({
+        context: { tokens: 76_000, window: 200_000, percent: 38 },
+        rateLimits: [
+          { kind: 'seven_day', percentUsed: 12 },
+          { kind: 'five_hour', percentUsed: 63.5, resetsAt: new Date(RESETS_MS).toISOString() },
+        ],
+      }),
+    )
+    expect(bars).toEqual([
+      { label: 'context', fraction: 0.38, figures: '38% · 76k of 200k' },
+      { label: '5-hour limit', fraction: 0.635, figures: `64% · resets ${resetsClock}` },
+    ])
+  })
+
+  test('a fresh session with no limit reading has no bars', () => {
+    expect(usageBars(usage({}))).toEqual([])
+  })
+
+  test('a context reading without tokens, or a limit without a reset, shows the percentage alone', () => {
+    const bars = usageBars(
+      usage({
+        context: { window: 200_000, percent: 5 },
+        rateLimits: [{ kind: 'five_hour', percentUsed: 7 }],
+      }),
+    )
+    expect(bars.map(bar => bar.figures)).toEqual(['5%', '7%'])
+  })
+
+  test('a reset time that is not a date is left out', () => {
+    const bars = usageBars(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 7, resetsAt: 'soon' }] }))
+    expect(bars.map(bar => bar.figures)).toEqual(['7%'])
+  })
+
+  test('a window of a million tokens or more is counted in millions', () => {
+    const bars = usageBars(usage({ context: { tokens: 250_000, window: 1_000_000, percent: 25 } }))
+    expect(bars[0]?.figures).toBe('25% · 250k of 1M')
+  })
+
+  test('a limit past 100% fills its bar and no more', () => {
+    const bars = usageBars(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 104 }] }))
+    expect(bars[0]).toEqual({ label: '5-hour limit', fraction: 1, figures: '104%' })
+  })
+})
+
+describe('costText', () => {
+  test('gives the cost in dollars and cents', () => {
+    expect(costText(usage({ cost: { usd: 1.8361 } }))).toBe('session cost $1.84')
+  })
+
+  test('is undefined where the host keeps no cost', () => {
+    expect(costText(usage({}))).toBeUndefined()
   })
 })

@@ -1,4 +1,4 @@
-import type { Color, Elements, RenderNode } from 'claude-code'
+import type { Color, Elements, RenderNode, SessionUsage } from 'claude-code'
 
 import type { EndedCall, Job, ListedAgent, RunningCall, SessionTurn, ToolCalls } from '../types'
 import { POLL_INTERVAL_MS } from './poll'
@@ -14,7 +14,7 @@ import {
   runKey,
   shownJobs,
 } from './progress'
-import { shortDurationText } from './session'
+import { costText, shortDurationText, usageBars } from './session'
 
 export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'This session'
@@ -22,6 +22,8 @@ export const PANE_TITLE = 'This session'
 const MAX_BAR_CELLS = 40
 // Agents beyond this many, the oldest, are counted rather than drawn.
 const MAX_SHOWN_AGENTS = 5
+// A usage bar this full is drawn in HIGH_USAGE_COLOUR.
+const HIGH_USAGE_FRACTION = 0.8
 // Columns kept clear to the right of the bar.
 const BAR_GAP_COLUMNS = 2
 const SPINNER_FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
@@ -33,6 +35,7 @@ const BAR_COLOUR: Color = 'claude'
 const STALLED_COLOUR: Color = 'warning'
 const DONE_COLOUR: Color = 'success'
 const FAILED_COLOUR: Color = 'error'
+const HIGH_USAGE_COLOUR: Color = 'warning'
 
 /** The elements the pane draws with, which every surface's table holds. */
 type PaneElements = Pick<Elements['terminal'], 'Box' | 'Button' | 'Text'>
@@ -59,7 +62,7 @@ type PaneView = {
   readonly askedJobs: ReadonlySet<string>
   readonly bodyColumns: number
   readonly nowMs: number
-  readonly sessionStartedMs: number
+  readonly usage: SessionUsage
   readonly stallMs: number
   readonly actions: PaneActions
   readonly toolCalls: ToolCalls
@@ -70,7 +73,8 @@ type PaneView = {
 
 /**
  * Draws the session as `docs/mockup.html` shows it: the call running now, the
- * jobs, the agents, then the last calls. A group with nothing in it is left out.
+ * jobs, the agents, the last calls, then the usage bars and the cost. A group
+ * with nothing in it is left out.
  */
 export function drawPane(ui: PaneElements, view: PaneView) {
   const { Box, Text } = ui
@@ -85,6 +89,7 @@ export function drawPane(ui: PaneElements, view: PaneView) {
       {jobsGroup(ui, view)}
       {agentsGroup(ui, view)}
       {recentGroup(ui, view.toolCalls.recent)}
+      {usageGroup(ui, view)}
     </Box>
   )
 }
@@ -193,12 +198,35 @@ function recentGroup(ui: PaneElements, calls: readonly EndedCall[]): RenderNode 
   )
 }
 
+/** The context and five-hour bars, each with its figures, and the session's cost. */
+function usageGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
+  const { Box, Text } = ui
+  const bars = usageBars(view.usage)
+  const cost = costText(view.usage)
+  if (bars.length === 0 && cost === undefined) return undefined
+  const cells = barCellsFor(view.bodyColumns)
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      {bars.map(bar => {
+        const colour = bar.fraction >= HIGH_USAGE_FRACTION ? HIGH_USAGE_COLOUR : BAR_COLOUR
+        return (
+          <Box key={bar.label} flexDirection="column">
+            {spreadRow(ui, <Text dimColor>{bar.label}</Text>, <Text dimColor>{bar.figures}</Text>)}
+            {barRow(ui, bar.fraction, cells, colour)}
+          </Box>
+        )
+      })}
+      {cost !== undefined && <Text dimColor>{cost}</Text>}
+    </Box>
+  )
+}
+
 /** The jobs: unfinished first, then the finished ones under their own label. */
 function jobsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   const { Box, Text } = ui
   const { unfinished, finished, hiddenCount } = shownJobs(
     view.jobs,
-    view.sessionStartedMs,
+    view.usage.startedAt,
     view.dismissedJobs,
   )
   if (unfinished.length === 0 && finished.length === 0 && hiddenCount === 0) return undefined
@@ -296,7 +324,12 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
 
   return [
     nameRow(ui, name, <Text>{stepText(line)}</Text>),
-    barRow(ui, line, barCellsFor(view.bodyColumns), hasStalled),
+    barRow(
+      ui,
+      line.step / line.total,
+      barCellsFor(view.bodyColumns),
+      hasStalled ? undefined : BAR_COLOUR,
+    ),
     spreadRow(ui, <Text dimColor>{line.label}</Text>, time),
   ]
 }
@@ -313,11 +346,12 @@ function stepText(line: RunningLine): string {
   return `${line.step}/${line.total}  ${String(percent).padStart(3, ' ')}%`
 }
 
-function barRow({ Text }: PaneElements, line: RunningLine, cells: number, isStalled: boolean) {
-  const { filled, empty } = barText(line.step / line.total, cells)
+/** A bar `fraction` full, its filled part in `colour`, or dim when that is `undefined`. */
+function barRow({ Text }: PaneElements, fraction: number, cells: number, colour: Color | undefined) {
+  const { filled, empty } = barText(fraction, cells)
   return (
     <Text>
-      {isStalled ? <Text dimColor>{filled}</Text> : <Text color={BAR_COLOUR}>{filled}</Text>}
+      {colour === undefined ? <Text dimColor>{filled}</Text> : <Text color={colour}>{filled}</Text>}
       <Text dimColor>{empty}</Text>
     </Text>
   )
