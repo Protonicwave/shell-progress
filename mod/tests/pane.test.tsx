@@ -439,6 +439,15 @@ test('Ask Claude submits the failed job once and then reads Asked Claude', async
   await ui.unmount()
 })
 
+test('two presses before a redraw ask Claude once', async ($, on) => {
+  const submitted = fakePrompts(on)
+  const { ui } = await failedMigration($, on, 'applying 0042_users')
+
+  await Promise.all([ui.press({ key: 'ask:migrate.sh-5.txt' }), ui.press({ key: 'ask:migrate.sh-5.txt' })])
+  expect(submitted).toHaveLength(1)
+  await ui.unmount()
+})
+
 test('a job that succeeded has no Ask Claude button', async ($, on) => {
   const { ui } = await failedMigration($, on, 'applying 0042_users', finishedLine(0, 64))
   expect(await ui.find({ type: 'Button', text: /^Ask Claude/ })).toBeUndefined()

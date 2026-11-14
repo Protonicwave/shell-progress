@@ -178,7 +178,15 @@ function paneActions($: EngineInterface) {
     showHiddenJobs: () => changeDismissedJobs($, () => []),
     askClaude: async (job: FinishedJob) => {
       const key = runKey(job)
-      await update($, askedJobs, keys => [...keys, key])
+      // Two presses before a redraw both land here; only the one that adds the
+      // key asks. `update` may run the change again on a missed write, so the
+      // run that lands sets the flag last.
+      let isFirstPress = false
+      await update($, askedJobs, keys => {
+        isFirstPress = !keys.includes(key)
+        return isFirstPress ? [...keys, key] : keys
+      })
+      if (!isFirstPress) return
       // Not awaited: a prompt sent while Claude works waits for the session to
       // go idle, and the press should not wait with it.
       void submitQuestion($, job, key)
