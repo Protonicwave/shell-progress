@@ -125,23 +125,24 @@ export function usageBars(usage: SessionUsage): readonly UsageBar[] {
   const bars: UsageBar[] = []
   const { tokens, window, percent } = usage.context
   if (percent !== undefined && Number.isFinite(percent)) {
-    const of = tokens === undefined ? '' : ` · ${tokensText(tokens)} of ${tokensText(window)}`
-    bars.push(usageBar('context', percent, of))
+    const tokenFigures = tokens === undefined ? '' : ` · ${tokensText(tokens)} of ${tokensText(window)}`
+    bars.push(usageBar('context', percent, tokenFigures))
   }
   const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
   if (limit !== undefined && Number.isFinite(limit.percentUsed)) {
     const resetsMs = limit.resetsAt === undefined ? Number.NaN : Date.parse(limit.resetsAt)
-    const when = Number.isNaN(resetsMs) ? '' : ` · resets ${clockTimeText(resetsMs, false)}`
-    bars.push(usageBar('5-hour limit', limit.percentUsed, when))
+    const resetFigures = Number.isNaN(resetsMs) ? '' : ` · resets ${clockTimeText(resetsMs, false)}`
+    bars.push(usageBar('5-hour limit', limit.percentUsed, resetFigures))
   }
   return bars
 }
 
-function usageBar(label: string, percent: number, rest: string): UsageBar {
+/** A bar for `percent`, its figures the rounded percentage then `laterFigures`. */
+function usageBar(label: string, percent: number, laterFigures: string): UsageBar {
   return {
     label,
     fraction: Math.min(1, Math.max(0, percent / PERCENT)),
-    figures: `${Math.round(percent)}%${rest}`,
+    figures: `${Math.round(percent)}%${laterFigures}`,
   }
 }
 

@@ -140,9 +140,8 @@ function jobFrom(file: ProgressFile, line: Job['line'], lastLabel: string): Job 
  */
 function lastLabelOf(line: Job['line'], known: Job | undefined): string {
   if (line?.kind === 'running') return line.label
-  const isSameRun =
-    line !== null && known?.line !== null && known?.line.startedSec === line.startedSec
-  return isSameRun ? known.lastLabel : ''
+  if (line === null || known === undefined || known.line === null) return ''
+  return known.line.startedSec === line.startedSec ? known.lastLabel : ''
 }
 
 /** Oldest start first, unreadable jobs last, ties by file name, so rows keep their places. */
