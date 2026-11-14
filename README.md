@@ -133,7 +133,9 @@ between calls, or once the turn ends, `Waiting for you` and how long the turn
 took. While a turn runs the header shows its time. Below come the jobs, then
 Agents, then Recent: the last three calls, newest first, each with how long it
 took, and in red when it failed. Only the main conversation's calls are shown,
-not a subagent's. A group with nothing in it is not drawn.
+not a subagent's. A call another mod makes through `$.tool.call` on the main
+conversation is shown as if Claude had made it. A group with nothing in it is
+not drawn.
 
 Agents lists the session's subagents and teammates, newest first, each with its
 task and whether it is running, waiting, completed or failed. Past five, the
@@ -167,11 +169,14 @@ again, or another job's name, collapses it. An expanded stalled or finished
 job has a Dismiss button, which hides the job from the pane in this session and
 later ones. The Jobs heading then counts the hidden jobs, and pressing the
 count shows them all again. A later run that writes to the same file name is a
-new job and shows.
+new job and shows. A dismissed stalled job whose script turns out to be alive
+stays hidden while it runs on and when it finishes.
 
 An expanded failed job also has an Ask Claude button, which sends Claude a
 prompt naming the script, how long it ran, its exit code and the last step it
-reported, and asks why it failed. If Claude is working, the prompt waits for
+reported, and asks why it failed. The last step is the label the script
+wrote, copied as it stands, so anything that can write to the progress
+directory chooses part of that prompt. If Claude is working, the prompt waits for
 the current turn to end. The button then reads Asked Claude for the rest of the
 session, unless the prompt was refused, in which case it returns.
 
