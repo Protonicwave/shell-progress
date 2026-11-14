@@ -1,4 +1,6 @@
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
+import type { On } from 'claude-code'
 
 import type { FakeFile } from './fake-world'
 import { POLL_MS, START_MS, STARTED_SEC, fakeWorld, runningLine, startSession } from './fake-world'
@@ -130,34 +132,17 @@ test('a job stalls once its file is unchanged for stallMinutes', { options: { st
   expect(world.statuses).toEqual(['build 50%', 'build stalled'])
 })
 
-test('the pane opens when the first running job appears, and only then', async ($, on) => {
+test('the pane opens at session start with no jobs, and not again when the module reloads', async ($, on) => {
   const files = new Map<string, FakeFile>()
   const { world, clock } = fakeWorld(on, files)
   await startSession($)
-
-  await clock.advance(POLL_MS)
-  expect(world.opens).toEqual([])
+  expect(world.opens).toEqual(['shell-progress'])
 
   files.set('build.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS })
   await clock.advance(POLL_MS)
-  expect(world.opens).toEqual(['shell-progress'])
-
-  files.set('build.sh-10.txt', { text: `${STARTED_SEC} done 0 ${STARTED_SEC + 1}\n`, mtimeMs: START_MS + 1 })
-  files.set('test.sh-11.txt', { text: runningLine(1, 2), mtimeMs: START_MS + 1 })
-  await clock.advance(POLL_MS * 2)
-  expect(world.opens).toEqual(['shell-progress'])
-})
-
-test('a stalled job left from earlier does not open the pane', { options: { stallMinutes: 1 } }, async ($, on) => {
-  const files = new Map<string, FakeFile>([
-    ['old.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS - 120_000 }],
-  ])
-  const { world, clock } = fakeWorld(on, files)
+  // A reload runs session.start again, with the session's state kept.
   await startSession($)
-
-  await clock.advance(POLL_MS)
-  expect(world.statuses).toEqual(['old stalled'])
-  expect(world.opens).toEqual([])
+  expect(world.opens).toEqual(['shell-progress'])
 })
 
 test('a changed file is read on the next poll however many others keep changing', async ($, on) => {
@@ -230,4 +215,105 @@ test('a poll that does not settle is logged once, and no second poll starts besi
   await clock.advance(60_000)
   expect(world.logs).toHaveLength(1)
   expect(world.lists).toBe(2)
+})
+
+const finishedLine = (exitCode: number, seconds: number) =>
+  `${STARTED_SEC} done ${exitCode} ${STARTED_SEC + seconds}\n`
+
+/** Starts a session with each file in `endings` running, then has them all end as given in one poll. */
+async function finishTogether(
+  $: Engine,
+  on: On,
+  endings: ReadonlyMap<string, { exitCode: number; seconds: number }>,
+) {
+  const files = new Map<string, FakeFile>()
+  for (const file of endings.keys()) files.set(file, { text: runningLine(1, 2), mtimeMs: START_MS })
+  const fake = fakeWorld(on, files)
+  await startSession($)
+  await fake.clock.advance(POLL_MS)
+  for (const [file, { exitCode, seconds }] of endings) {
+    files.set(file, { text: finishedLine(exitCode, seconds), mtimeMs: START_MS + 1 })
+  }
+  await fake.clock.advance(POLL_MS)
+  return fake
+}
+
+test('jobs that finish in one poll raise one toast, and a notification for the failed and the long', async ($, on) => {
+  const { world } = await finishTogether($, on, new Map([
+    ['lint.sh-1.txt', { exitCode: 0, seconds: 30 }],
+    ['migrate.sh-2.txt', { exitCode: 1, seconds: 10 }],
+    ['build.sh-3.txt', { exitCode: 0, seconds: 150 }],
+  ]))
+  expect(world.toasts).toEqual(['3 jobs finished, 1 failed'])
+  expect(world.notifications).toEqual(['2 jobs finished, 1 failed'])
+})
+
+test('a short successful job raises a toast and no notification', async ($, on) => {
+  const { world, clock } = await finishTogether($, on, new Map([
+    ['lint.sh-1.txt', { exitCode: 0, seconds: 30 }],
+  ]))
+  await clock.advance(POLL_MS * 2)
+  expect(world.toasts).toEqual(['lint.sh done in 0m 30s'])
+  expect(world.notifications).toEqual([])
+})
+
+test('notifyMinutes sets how long a successful job runs before it notifies', { options: { notifyMinutes: 1 } }, async ($, on) => {
+  const { world } = await finishTogether($, on, new Map([
+    ['build.sh-3.txt', { exitCode: 0, seconds: 90 }],
+  ]))
+  expect(world.notifications).toEqual(['build.sh done in 1m 30s'])
+})
+
+test('a job already finished when first seen is not announced', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['lint.sh-1.txt', { text: finishedLine(1, 30), mtimeMs: START_MS }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+  await clock.advance(POLL_MS * 2)
+  expect(world.toasts).toEqual([])
+  expect(world.notifications).toEqual([])
+})
+
+test('a dismissed job that finishes is not announced', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['build.sh-1.txt', { text: runningLine(1, 2), mtimeMs: START_MS }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  world.store.set('dismissedJobs', [`build.sh-1.txt:${STARTED_SEC}`])
+  await startSession($)
+  await clock.advance(POLL_MS)
+  files.set('build.sh-1.txt', { text: finishedLine(1, 30), mtimeMs: START_MS + 1 })
+  await clock.advance(POLL_MS)
+  expect(world.toasts).toEqual([])
+  expect(world.notifications).toEqual([])
+})
+
+test('a notification that is not sent is logged once and not retried', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['migrate.sh-2.txt', { text: runningLine(1, 2), mtimeMs: START_MS }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  world.notifyResult = { isSent: false, reason: 'no-channel' }
+  await startSession($)
+  await clock.advance(POLL_MS)
+  files.set('migrate.sh-2.txt', { text: finishedLine(1, 10), mtimeMs: START_MS + 1 })
+  await clock.advance(POLL_MS * 3)
+  expect(world.notifications).toHaveLength(1)
+  expect(world.logs).toEqual(['shell-progress: notification not sent: no-channel'])
+})
+
+test('a notification that fails is logged once and not retried', async ($, on) => {
+  const files = new Map<string, FakeFile>([
+    ['migrate.sh-2.txt', { text: runningLine(1, 2), mtimeMs: START_MS }],
+  ])
+  const { world, clock } = fakeWorld(on, files)
+  world.notifyResult = { deny: 'denied by a hook' }
+  await startSession($)
+  await clock.advance(POLL_MS)
+  files.set('migrate.sh-2.txt', { text: finishedLine(1, 10), mtimeMs: START_MS + 1 })
+  await clock.advance(POLL_MS * 3)
+  expect(world.notifications).toHaveLength(1)
+  expect(world.logs).toHaveLength(1)
+  expect(world.logs[0]).toMatch(/^shell-progress: notification failed: .*denied by a hook/)
 })

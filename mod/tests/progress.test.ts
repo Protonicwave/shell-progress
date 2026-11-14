@@ -2,14 +2,22 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { Job, ProgressLine } from '../types'
 import {
+  announcementText,
+  askClaudeText,
   barText,
+  runKey,
   durationText,
+  finishedSince,
   finishedText,
   isStalled,
+  isWorthNotifying,
   parseProgressLine,
+  remainingSeconds,
+  remainingText,
   shownJobs,
   statusSummary,
 } from '../hooks/progress'
+import type { FinishedJob, RunningLine } from '../hooks/progress'
 
 const STALL_MS = 10 * 60_000
 const NOW_MS = 1_700_000_100_000
@@ -18,13 +26,15 @@ const running = (
   step: number,
   total: number,
   label = '',
-): ProgressLine => ({ kind: 'running', startedSec: 1_700_000_000, step, total, label })
+): RunningLine => ({ kind: 'running', startedSec: 1_700_000_000, step, total, label })
 
 const job = (script: string, line: ProgressLine | null, mtimeMs = NOW_MS): Job => ({
   file: `${script}-1.txt`,
   script,
+  pid: '1',
   mtimeMs,
   line,
+  lastLabel: line?.kind === 'running' ? line.label : '',
 })
 
 describe('parseProgressLine', () => {
@@ -234,30 +244,205 @@ describe('finishedText', () => {
   })
 })
 
+describe('remainingSeconds', () => {
+  // NOW_MS is 100 s after `running`'s start.
+  test('gives none before the third step', () => {
+    expect(remainingSeconds(running(2, 10), NOW_MS)).toBeUndefined()
+  })
+
+  test('gives none for a job with no step count', () => {
+    expect(remainingSeconds(running(5, 0), NOW_MS)).toBeUndefined()
+  })
+
+  test('takes the average time per step so far over the steps left', () => {
+    expect(remainingSeconds(running(4, 10), NOW_MS)).toBe(150)
+  })
+
+  test('gives none at the last step, which may run on for any time', () => {
+    expect(remainingSeconds(running(10, 10), NOW_MS)).toBeUndefined()
+  })
+
+  test('counts a start in the future as no time spent', () => {
+    expect(remainingSeconds(running(4, 10), 1_699_999_990_000)).toBe(0)
+  })
+})
+
+describe('remainingText', () => {
+  test('rounds to the nearest 5 seconds', () => {
+    expect(remainingText(23)).toBe('about 25s left')
+    expect(remainingText(150)).toBe('about 2m 30s left')
+  })
+
+  test('never says less than 5 seconds', () => {
+    expect(remainingText(0)).toBe('about 5s left')
+  })
+
+  test('gives minutes from 60 seconds and hours from an hour', () => {
+    expect(remainingText(58)).toBe('about 1m 00s left')
+    expect(remainingText(7_505)).toBe('about 2h 05m left')
+  })
+})
+
+describe('runKey', () => {
+  test('names the file and the run, so a later run in the same file is a new job', () => {
+    expect(runKey(job('build.sh', running(1, 2)))).toBe('build.sh-1.txt:1700000000')
+  })
+
+  test('gives none for an unreadable job', () => {
+    expect(runKey(job('odd.sh', null))).toBeUndefined()
+  })
+})
+
+describe('finishedSince', () => {
+  const done = (exitCode = 0): ProgressLine => ({
+    kind: 'finished',
+    startedSec: 1_700_000_000,
+    exitCode,
+    endedSec: 1_700_000_031,
+  })
+
+  test('gives the jobs that went from running to finished', () => {
+    const previous = [job('build.sh', running(1, 2)), job('lint.sh', running(3, 4))]
+    const current = [job('build.sh', done()), job('lint.sh', running(4, 4))]
+    expect(finishedSince(previous, current)).toEqual([job('build.sh', done())])
+  })
+
+  test('leaves out a job first seen finished, one already finished and one that was unreadable', () => {
+    const previous = [job('lint.sh', done()), job('odd.sh', null)]
+    const current = [job('build.sh', done(1)), job('lint.sh', done()), job('odd.sh', done())]
+    expect(finishedSince(previous, current)).toEqual([])
+  })
+})
+
+describe('announcementText', () => {
+  const finishedJob = (script: string, exitCode: number): FinishedJob => ({
+    ...job(script, null),
+    line: { kind: 'finished', startedSec: 1_700_000_000, exitCode, endedSec: 1_700_000_031 },
+  })
+
+  test('names a single job and how it ended', () => {
+    expect(announcementText([finishedJob('build.sh', 0)])).toBe('build.sh done in 0m 31s')
+    expect(announcementText([finishedJob('migrate.sh', 1)])).toBe(
+      'migrate.sh failed after 0m 31s, exit 1',
+    )
+  })
+
+  test('counts several jobs and their failures', () => {
+    const jobs = [finishedJob('a.sh', 0), finishedJob('b.sh', 2), finishedJob('c.sh', 0)]
+    expect(announcementText(jobs)).toBe('3 jobs finished, 1 failed')
+    expect(announcementText([finishedJob('a.sh', 0), finishedJob('c.sh', 0)])).toBe(
+      '2 jobs finished',
+    )
+  })
+})
+
+describe('askClaudeText', () => {
+  const failedJob = (lastLabel: string): FinishedJob => ({
+    ...job('migrate.sh', null),
+    line: { kind: 'finished', startedSec: 1_700_000_000, exitCode: 2, endedSec: 1_700_000_064 },
+    lastLabel,
+  })
+
+  test('says how the job failed and the last step it reported', () => {
+    expect(askClaudeText(failedJob('applying 0042_users'))).toBe(
+      'The background job migrate.sh failed after 1m 04s, exit 2. ' +
+        'Its last step was "applying 0042_users". Find out why it failed.',
+    )
+  })
+
+  test('leaves out the step when the job reported none', () => {
+    expect(askClaudeText(failedJob(''))).toBe(
+      'The background job migrate.sh failed after 1m 04s, exit 2. Find out why it failed.',
+    )
+  })
+})
+
+describe('isWorthNotifying', () => {
+  const finishedJob = (exitCode: number, seconds: number): FinishedJob => ({
+    ...job('build.sh', null),
+    line: { kind: 'finished', startedSec: 1_700_000_000, exitCode, endedSec: 1_700_000_000 + seconds },
+  })
+
+  test('holds for a failure of any length', () => {
+    expect(isWorthNotifying(finishedJob(1, 1), 120)).toBe(true)
+  })
+
+  test('holds for a success only from the given number of seconds', () => {
+    expect(isWorthNotifying(finishedJob(0, 119), 120)).toBe(false)
+    expect(isWorthNotifying(finishedJob(0, 120), 120)).toBe(true)
+  })
+})
+
 describe('shownJobs', () => {
   const SESSION_STARTED_MS = 1_700_000_000_500
+  const NONE_DISMISSED = new Set<string>()
   const finished = (script: string, endedSec: number, exitCode = 0): Job =>
     job(script, { kind: 'finished', startedSec: 1_699_999_000, exitCode, endedSec })
+  const keysOf = (...jobs: Job[]) => new Set(jobs.map(one => runKey(one) ?? ''))
 
   test('keeps running and unreadable jobs unfinished, in the order given', () => {
     const jobs = [job('build.sh', running(1, 2)), job('odd.sh', null), job('sync.sh', running(0, 0))]
-    expect(shownJobs(jobs, SESSION_STARTED_MS)).toEqual({ unfinished: jobs, finished: [] })
+    expect(shownJobs(jobs, SESSION_STARTED_MS, NONE_DISMISSED)).toEqual({
+      unfinished: jobs,
+      finished: [],
+      hiddenCount: 0,
+    })
   })
 
   test('hides jobs that finished before the session started', () => {
     const before = finished('old.sh', 1_699_999_999)
     const sameSecond = finished('edge.sh', 1_700_000_000)
-    expect(shownJobs([before, sameSecond], SESSION_STARTED_MS).finished).toEqual([sameSecond])
+    expect(shownJobs([before, sameSecond], SESSION_STARTED_MS, NONE_DISMISSED).finished).toEqual([
+      sameSecond,
+    ])
   })
 
   test('shows the five newest finished jobs, newest first', () => {
     const jobs = [1, 2, 3, 4, 5, 6, 7].map(n => finished(`job${n}.sh`, 1_700_000_000 + n, n % 2))
-    expect(shownJobs(jobs, SESSION_STARTED_MS).finished.map(one => one.script)).toEqual([
-      'job7.sh',
-      'job6.sh',
-      'job5.sh',
-      'job4.sh',
-      'job3.sh',
-    ])
+    expect(
+      shownJobs(jobs, SESSION_STARTED_MS, NONE_DISMISSED).finished.map(one => one.script),
+    ).toEqual(['job7.sh', 'job6.sh', 'job5.sh', 'job4.sh', 'job3.sh'])
+  })
+
+  test('leaves out dismissed jobs and counts them as hidden', () => {
+    const stalled = job('build.sh', running(1, 2), NOW_MS - STALL_MS)
+    const done = finished('lint.sh', 1_700_000_005)
+    const kept = finished('test.sh', 1_700_000_006)
+    expect(shownJobs([stalled, done, kept], SESSION_STARTED_MS, keysOf(stalled, done))).toEqual({
+      unfinished: [],
+      finished: [kept],
+      hiddenCount: 2,
+    })
+  })
+
+  test('shows a later run in the same file as a dismissed one', () => {
+    const earlier = job('build.sh', { ...running(1, 2), startedSec: 1_699_999_000 })
+    const later = job('build.sh', running(1, 2))
+    expect(shownJobs([later], SESSION_STARTED_MS, keysOf(earlier))).toEqual({
+      unfinished: [later],
+      finished: [],
+      hiddenCount: 0,
+    })
+  })
+
+  test('does not count a dismissed job that would not show anyway', () => {
+    const old = finished('old.sh', 1_699_999_999)
+    expect(shownJobs([old], SESSION_STARTED_MS, keysOf(old)).hiddenCount).toBe(0)
+  })
+
+  test('counts only the dismissed jobs that showing them again would bring back', () => {
+    const jobs = [1, 2, 3, 4, 5, 6, 7, 8].map(n => finished(`job${n}.sh`, 1_700_000_000 + n))
+    const oldest = jobs.filter(one => ['job1.sh', 'job2.sh', 'job3.sh'].includes(one.script))
+    expect(shownJobs(jobs, SESSION_STARTED_MS, keysOf(...oldest)).hiddenCount).toBe(0)
+    const newest = jobs.filter(one => one.script === 'job8.sh')
+    expect(shownJobs(jobs, SESSION_STARTED_MS, keysOf(...oldest, ...newest)).hiddenCount).toBe(1)
+  })
+
+  test('fills the place of a dismissed finished job with the next newest', () => {
+    const jobs = [1, 2, 3, 4, 5, 6].map(n => finished(`job${n}.sh`, 1_700_000_000 + n))
+    const dismissed = keysOf(...jobs.filter(one => one.script === 'job6.sh'))
+    expect(
+      shownJobs(jobs, SESSION_STARTED_MS, dismissed).finished.map(one => one.script),
+    ).toEqual(['job5.sh', 'job4.sh', 'job3.sh', 'job2.sh', 'job1.sh'])
   })
 })
