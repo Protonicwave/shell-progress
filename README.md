@@ -130,7 +130,9 @@ in.
 The pane is titled This session. Its first line shows the tool call Claude is
 running, such as `Bash npm test`, with how long it has run, or `Thinking`
 between calls, or once the turn ends, `Waiting for you` and how long the turn
-took. While a turn runs the header shows its time. Below come the jobs, then
+took. While a turn runs the header shows its time. If the mod is reloaded
+during a turn, that time stops moving until the next turn starts, unless a
+running job keeps the pane redrawing. Below come the jobs, then
 Agents, then Recent: the last three calls, newest first, each with how long it
 took, and in red when it failed. Only the main conversation's calls are shown,
 not a subagent's. A call another mod makes through `$.tool.call` on the main
