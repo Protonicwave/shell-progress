@@ -185,7 +185,8 @@ session, unless the prompt was refused, in which case it returns.
 
 The pane opens by itself when a session starts, if the terminal is at least
 144 columns wide. It does not open by itself again in that session once
-closed. `/progress` opens it at any width. While a job runs,
+closed. `/progress` opens it at any width. Docked beside the transcript it
+opens 48 columns wide, or at the width you last dragged it to. While a job runs,
 the status line under the prompt also names up to two jobs with their
 percentages, such as `build 58% · sync running · 1 more`.
 

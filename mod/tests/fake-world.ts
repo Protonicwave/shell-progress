@@ -40,7 +40,8 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     reads: [] as string[],
     statuses: [] as (string | undefined)[],
     logs: [] as string[],
-    opens: [] as string[],
+    /** The id and requested width of each pane the mod opens. */
+    opens: [] as { id: string; columns: number | undefined }[],
     /** What each `$.ui.open` answers; a test may change it. */
     openResult: { isPlaced: true } as UiOpenResult,
     /** Set to make every later listing never settle, as on a hung network share. */
@@ -99,7 +100,7 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
   on('session.usage', () => ({ value: world.usage }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('ui.open', (_, e) => {
-    world.opens.push(e.id)
+    world.opens.push({ id: e.id, columns: e.columns })
     return { value: world.openResult }
   })
   on('store.get', (_, e) => {

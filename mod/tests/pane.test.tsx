@@ -169,13 +169,13 @@ test('a long label is cut at the edge of the pane', async ($, on) => {
   await ui.unmount()
 })
 
-test('/progress opens the pane', async ($, on) => {
+test('/progress opens the pane, asking for 48 columns', async ($, on) => {
   const { world } = fakeWorld(on, new Map())
   await startSession($)
   world.opens.length = 0
 
   const result = await runProgressCommand($)
-  expect(world.opens).toEqual(['shell-progress'])
+  expect(world.opens).toEqual([{ id: 'shell-progress', columns: 48 }])
   expect(result.text).toBe('Session pane opened.')
 })
 

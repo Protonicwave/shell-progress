@@ -21,6 +21,9 @@ import { costText, shortDurationText, usageRows } from './session'
 
 export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'This session'
+// The width the pane asks for when docked: room for a usage bar of 14 cells
+// beside its label and the widest figures it usually has.
+export const PANE_COLUMNS = 48
 
 const MAX_BAR_CELLS = 40
 // Agents beyond this many, the oldest, are counted rather than drawn.

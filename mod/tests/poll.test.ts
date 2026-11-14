@@ -136,13 +136,13 @@ test('the pane opens at session start with no jobs, and not again when the modul
   const files = new Map<string, FakeFile>()
   const { world, clock } = fakeWorld(on, files)
   await startSession($)
-  expect(world.opens).toEqual(['shell-progress'])
+  expect(world.opens).toEqual([{ id: 'shell-progress', columns: 48 }])
 
   files.set('build.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS })
   await clock.advance(POLL_MS)
   // A reload runs session.start again, with the session's state kept.
   await startSession($)
-  expect(world.opens).toEqual(['shell-progress'])
+  expect(world.opens).toEqual([{ id: 'shell-progress', columns: 48 }])
 })
 
 test('a changed file is read on the next poll however many others keep changing', async ($, on) => {

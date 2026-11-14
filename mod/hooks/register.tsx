@@ -3,7 +3,7 @@ import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude
 
 import type { Job, ListedAgent, RunningCall, SessionTurn } from '../types'
 import type { FinishedJob } from './progress'
-import { PANE_ID, PANE_TITLE, drawPane } from './pane'
+import { PANE_COLUMNS, PANE_ID, PANE_TITLE, drawPane } from './pane'
 import { POLL_INTERVAL_MS, pollJobs } from './poll'
 import {
   MS_PER_SECOND,
@@ -33,6 +33,8 @@ const DISMISSED_STORE_KEY = 'dismissedJobs'
 // A run key names one run, so an old key never hides a new job; past
 // this many, the oldest are dropped, which only brings their jobs back.
 const MAX_DISMISSED_JOBS = 200
+// A width the person dragged the pane to wins over `columns`.
+const PANE_REQUEST = { id: PANE_ID, title: PANE_TITLE, columns: PANE_COLUMNS } as const
 
 // Change the tag when Job's fields change: it declines what an earlier
 // version stored, which outlives a reload.
@@ -78,7 +80,7 @@ export const register: Register = (on, options) => {
   followSession(on)
 
   on('command.run', { command: COMMAND_NAME }, async $ => {
-    const opened = await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
+    const opened = await $.ui.open(PANE_REQUEST)
     return {
       text: opened.isPlaced
         ? 'Session pane opened.'
@@ -408,5 +410,5 @@ async function openPaneOnce($: EngineInterface): Promise<void> {
   await update($, hasOpenedPane, () => true)
   // Too narrow a terminal leaves the pane unplaced, waiting for more width or
   // for /progress, which is the behaviour wanted, so the answer is not used.
-  await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
+  await $.ui.open(PANE_REQUEST)
 }
