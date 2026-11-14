@@ -358,15 +358,15 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
             <div class="row"><span><span class="spin" id="now-spin" aria-hidden="true"></span><span class="name" id="now-tool"></span> <span class="step" id="now-arg"></span></span><span class="step" id="now-t"></span></div>
           </div>
           <div class="pane-list">
-            <div class="group sess">Recent</div>
-            <div class="sess" id="recent"><p class="step none" id="recent-none">Nothing finished yet.</p></div>
-            <div class="group sess">Agents</div>
-            <div class="sess" id="agents"></div>
             <div class="group sess jobs-label" id="jobs-label"><span>Jobs</span></div>
             <p class="step none sess" id="nojobs" hidden>No scripts reporting progress.</p>
             <div id="running"></div>
             <div class="group" id="finished-label">Finished</div>
             <div id="finished"></div>
+            <div class="group sess">Agents</div>
+            <div class="sess" id="agents"></div>
+            <div class="group sess">Recent</div>
+            <div class="sess" id="recent"><p class="step none" id="recent-none">Nothing finished yet.</p></div>
           </div>
           <div class="foot sess">
             <div class="gauge">
@@ -858,7 +858,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   const flash = el => { el.classList.remove("enter"); void el.offsetWidth; el.classList.add("enter"); };
 
   function createRecentRows() {
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       const root = document.createElement("div");
       root.className = "rrow";
       root.hidden = true;
@@ -991,7 +991,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     c.line.insertAdjacentHTML("beforeend", `<br><span class="sub">  ⎿  ${res}</span>`);
     if (follow && !t.hidden) t.scrollTop = t.scrollHeight;
     S.recent.unshift({ tool: c.tool, arg: c.arg, dur: c.dur, bad: !!c.bad });
-    S.recent.length = Math.min(S.recent.length, 4);
+    S.recent.length = Math.min(S.recent.length, 3);
     S.fresh = true;
     S.cur = null;
   }
