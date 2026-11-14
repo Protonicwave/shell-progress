@@ -58,6 +58,19 @@ export type ToolCalls = {
   readonly recent: readonly EndedCall[]
 }
 
+/** A subagent or teammate of the session, as the pane lists it. */
+export type ListedAgent = {
+  /** Its id in `$.agent.list()`, which `$.ui.view` takes. */
+  readonly id: string
+  /** Its description, else its name, else its type. */
+  readonly label: string
+  /**
+   * The engine's AgentStatus, spelt out because this file may not import: a
+   * status the engine adds fails the type-check where the mod copies it.
+   */
+  readonly status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed'
+}
+
 /** Whether the main conversation's turn is running, and how long the last one took. */
 export type SessionTurn =
   | { readonly kind: 'running'; readonly startedMs: number }
@@ -80,6 +93,8 @@ declare module 'claude-code' {
       askedJobs: readonly string[]
       toolCalls: Shaped<ToolCalls>
       sessionTurn: Shaped<SessionTurn>
+      /** In the order the mod first saw them, oldest first. */
+      agents: Shaped<readonly ListedAgent[]>
     }
   }
 }

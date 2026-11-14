@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { ToolCallResult } from 'claude-code'
+import type { AgentInfo, AgentStatus, ToolCallResult } from 'claude-code'
 
-import { fakeWorld, mountPane, startSession } from './fake-world'
+import { POLL_MS, fakeWorld, mountPane, startSession } from './fake-world'
 
 const TURN_ID = 'turn-1'
 
@@ -134,13 +134,99 @@ test("the turn's time moves on while it runs", async ($, on) => {
   await ui.unmount()
 })
 
-test('a pane with no jobs and no calls draws neither group', async ($, on) => {
-  fakeWorld(on, new Map())
+test('a pane with no jobs, agents or calls draws none of their groups', async ($, on) => {
+  const { clock } = fakeWorld(on, new Map())
   await startSession($)
+  await clock.advance(POLL_MS)
 
   const ui = await mountPane($)
   expect((await ui.find({ type: 'Text', text: 'This session' }))?.text).toBe('This session')
   expect(await ui.find({ type: 'Text', text: 'Jobs' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Agents' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'Recent' })).toBeUndefined()
+  await ui.unmount()
+})
+
+const agent = (id: string, description: string, status: AgentStatus = 'running'): AgentInfo => ({
+  id,
+  description,
+  type: 'Explore',
+  status,
+})
+
+test('Agents lists the agents newest first with their status, and drops one the engine drops', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  world.agents = [agent('a1', 'review migrations', 'completed'), agent('a2', 'find callers')]
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: 'Agents' })).toBeDefined()
+  const rows = await ui.findAll({ type: 'Button', text: /^(review migrations|find callers)$/ })
+  expect(rows.map(row => row.text)).toEqual(['find callers', 'review migrations'])
+  expect((await ui.find({ type: 'Text', text: /^completed$/ }))?.props['color']).toBe('success')
+  expect((await ui.find({ type: 'Text', text: /^running$/ }))?.props['color']).toBe('claude')
+
+  world.agents = [agent('a2', 'find callers', 'failed')]
+  await clock.advance(POLL_MS)
+  expect(await ui.find({ type: 'Button', text: 'review migrations' })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /^failed$/ }))?.props['color']).toBe('error')
+  await ui.unmount()
+})
+
+test("pressing an agent's row shows its transcript", async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  world.agents = [agent('a1', 'review migrations')]
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  await ui.press({ key: 'agent:a1' })
+  expect(world.views).toEqual(['a1'])
+  expect(world.toasts).toEqual([])
+  await ui.unmount()
+})
+
+test('a transcript that cannot be shown says why in a toast', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  world.agents = [agent('a1', 'review migrations')]
+  world.viewResult = { deny: 'the teammate runs in a pane of its own' }
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  await ui.press({ key: 'agent:a1' })
+  expect(world.toasts).toEqual([
+    'Cannot show review migrations: the teammate runs in a pane of its own',
+  ])
+  await ui.unmount()
+})
+
+test('past five agents the newest five are drawn and the rest counted', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  world.agents = ['1', '2', '3', '4', '5', '6', '7'].map(id => agent(id, `task ${id}`))
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  const rows = await ui.findAll({ type: 'Button', text: /^task \d$/ })
+  expect(rows.map(row => row.text)).toEqual(['task 7', 'task 6', 'task 5', 'task 4', 'task 3'])
+  expect((await ui.find({ type: 'Text', text: /^2 more$/ }))?.text).toBe('2 more')
+  await ui.unmount()
+})
+
+test('a failing agent list is logged once and the last list stays drawn', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  world.agents = [agent('a1', 'review migrations')]
+  await startSession($)
+  await clock.advance(POLL_MS)
+
+  world.isAgentListFailing = true
+  for (let poll = 0; poll < 3; poll += 1) await clock.advance(POLL_MS)
+  expect(world.logs).toHaveLength(1)
+  expect(world.logs[0]).toMatch(/^shell-progress: cannot list agents: /)
+
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Button', text: 'review migrations' })).toBeDefined()
   await ui.unmount()
 })

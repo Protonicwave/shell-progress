@@ -1,6 +1,6 @@
 import { expect, mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On, SessionUsage, UiNotifyResult, UiOpenResult } from 'claude-code'
+import type { AgentInfo, On, SessionUsage, UiNotifyResult, UiOpenResult, UiViewResult } from 'claude-code'
 
 const DIR = '/work/progress'
 // The engine hands paths on in the platform's form, a drive letter and
@@ -51,6 +51,14 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     notifications: [] as string[],
     /** What each `$.ui.notify` answers, or the hook's reason to deny it; a test may change it. */
     notifyResult: { isSent: true, channel: 'kitty' } as UiNotifyResult | { deny: string },
+    /** What each `$.agent.list` answers; a test may change it. */
+    agents: [] as AgentInfo[],
+    /** Set to make every later `$.agent.list` reject. */
+    isAgentListFailing: false,
+    /** The agent ids the mod asked `$.ui.view` to show. */
+    views: [] as (string | undefined)[],
+    /** What each `$.ui.view` answers; a test may change it. */
+    viewResult: {} as UiViewResult,
   }
   const clock = mock.clock(on, { now: START_MS })
   mock.env(on, { CLAUDE_PROGRESS_DIR: DIR })
@@ -104,6 +112,15 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
   on('ui.log', (_, e) => {
     world.logs.push(e.text)
     return { value: undefined }
+  })
+  on('agent.list', () => {
+    // A hook that throws is skipped, and with none left the call rejects.
+    if (world.isAgentListFailing) throw new Error('agent list unavailable')
+    return { value: world.agents }
+  })
+  on('ui.view', (_, e) => {
+    world.views.push(e.agentId)
+    return { value: world.viewResult }
   })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))

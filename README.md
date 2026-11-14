@@ -131,9 +131,16 @@ The pane is titled This session. Its first line shows the tool call Claude is
 running, such as `Bash npm test`, with how long it has run, or `Thinking`
 between calls, or once the turn ends, `Waiting for you` and how long the turn
 took. While a turn runs the header shows its time. Below come the jobs, then
-Recent: the last three calls, newest first, each with how long it took, and in
-red when it failed. Only the main conversation's calls are shown, not a
-subagent's. A group with nothing in it is not drawn.
+Agents, then Recent: the last three calls, newest first, each with how long it
+took, and in red when it failed. Only the main conversation's calls are shown,
+not a subagent's. A group with nothing in it is not drawn.
+
+Agents lists the session's subagents and teammates, newest first, each with its
+task and whether it is running, waiting, completed or failed. Past five, the
+rest are counted. Pressing an agent's task shows its transcript in the main
+view, as the tasks list does; a toast says why when it cannot, for example
+for a teammate that runs in a terminal pane of its own. An agent leaves the
+list when Claude Code stops tracking it, shortly after it ends.
 
 Under Jobs, the pane lists each running job with a bar, its step and total, its label and
 the time since it started. From its third step a job also shows about how long

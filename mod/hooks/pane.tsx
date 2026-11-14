@@ -1,6 +1,6 @@
 import type { Color, Elements, RenderNode } from 'claude-code'
 
-import type { EndedCall, Job, RunningCall, SessionTurn, ToolCalls } from '../types'
+import type { EndedCall, Job, ListedAgent, RunningCall, SessionTurn, ToolCalls } from '../types'
 import { POLL_INTERVAL_MS } from './poll'
 import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
 import {
@@ -20,6 +20,8 @@ export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'This session'
 
 const MAX_BAR_CELLS = 40
+// Agents beyond this many, the oldest, are counted rather than drawn.
+const MAX_SHOWN_AGENTS = 5
 // Columns kept clear to the right of the bar.
 const BAR_GAP_COLUMNS = 2
 const SPINNER_FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
@@ -35,14 +37,16 @@ const FAILED_COLOUR: Color = 'error'
 /** The elements the pane draws with, which every surface's table holds. */
 type PaneElements = Pick<Elements['terminal'], 'Box' | 'Button' | 'Text'>
 
-/** What the pane's buttons do. Each settles once the change is stored. */
-type JobActions = {
+/** What the pane's buttons do. Each settles once the change is stored or shown. */
+type PaneActions = {
   /** Expands the job's row, or collapses it if it is the expanded one. */
   readonly toggleJob: (file: string) => Promise<void>
   readonly dismissJob: (key: string) => Promise<void>
   readonly showHiddenJobs: () => Promise<void>
   /** Sends Claude a prompt about the failed job, and settles before Claude answers. */
   readonly askClaude: (job: FinishedJob) => Promise<void>
+  /** Shows the agent's transcript in the main view, or says in a toast why it cannot. */
+  readonly viewAgent: (agent: ListedAgent) => Promise<void>
 }
 
 /** What the pane draws at one moment. */
@@ -57,14 +61,16 @@ type PaneView = {
   readonly nowMs: number
   readonly sessionStartedMs: number
   readonly stallMs: number
-  readonly actions: JobActions
+  readonly actions: PaneActions
   readonly toolCalls: ToolCalls
   readonly turn: SessionTurn
+  /** Oldest first. */
+  readonly agents: readonly ListedAgent[]
 }
 
 /**
  * Draws the session as `docs/mockup.html` shows it: the call running now, the
- * jobs, then the last calls. A group with nothing in it is left out.
+ * jobs, the agents, then the last calls. A group with nothing in it is left out.
  */
 export function drawPane(ui: PaneElements, view: PaneView) {
   const { Box, Text } = ui
@@ -77,6 +83,7 @@ export function drawPane(ui: PaneElements, view: PaneView) {
       {spreadRow(ui, <Text bold>{PANE_TITLE}</Text>, turnTime)}
       <Box marginTop={1}>{nowRow(ui, view)}</Box>
       {jobsGroup(ui, view)}
+      {agentsGroup(ui, view)}
       {recentGroup(ui, view.toolCalls.recent)}
     </Box>
   )
@@ -108,6 +115,60 @@ function runningCallRow(ui: PaneElements, nowMs: number, call: RunningCall): Ren
     </Text>,
     <Text dimColor>{shortDurationText(nowMs - call.startedMs)}</Text>,
   )
+}
+
+/** The newest agents, newest first, each a button that shows its transcript. */
+function agentsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
+  const { Box, Button, Text } = ui
+  if (view.agents.length === 0) return undefined
+  const shown = view.agents.slice(-MAX_SHOWN_AGENTS).reverse()
+  const moreCount = view.agents.length - shown.length
+  const more = moreCount > 0 ? <Text dimColor>{moreCount} more</Text> : undefined
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      {spreadRow(ui, <Text dimColor>Agents</Text>, more)}
+      {shown.map(agent => {
+        const colour = agentStatusColour(agent.status)
+        const button = (
+          <Button
+            key={`agent:${agent.id}`}
+            plain
+            label={agent.label}
+            onPress={() => view.actions.viewAgent(agent)}
+          />
+        )
+        const status =
+          colour === undefined ? (
+            <Text dimColor>{agent.status}</Text>
+          ) : (
+            <Text color={colour}>{agent.status}</Text>
+          )
+        return <Box key={agent.id}>{nameRow(ui, button, status)}</Box>
+      })}
+    </Box>
+  )
+}
+
+/** The colour of a working, succeeded or failed agent; `undefined` for one that waits. */
+function agentStatusColour(status: ListedAgent['status']): Color | undefined {
+  switch (status) {
+    case 'running':
+      return BAR_COLOUR
+    case 'completed':
+      return DONE_COLOUR
+    case 'failed':
+    case 'killed':
+      return FAILED_COLOUR
+    case 'pending':
+    case 'waiting':
+    case 'idle':
+      return undefined
+    default:
+      // A status from an engine newer than these types is drawn as waiting
+      // rather than breaking the pane; `satisfies` makes the type-check catch it.
+      status satisfies never
+      return undefined
+  }
 }
 
 /** The last calls, newest first, each with how long it took. */

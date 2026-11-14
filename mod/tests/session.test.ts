@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
+import type { AgentInfo, AgentStatus } from 'claude-code'
 
 import type { EndedCall, RunningCall, ToolCalls } from '../types'
 import {
@@ -6,6 +7,7 @@ import {
   RECENT_CALL_COUNT,
   shortDurationText,
   endTurnCalls,
+  mergeAgents,
   recordEnd,
   recordStart,
   toolArgumentText,
@@ -101,4 +103,53 @@ describe('shortDurationText', () => {
       expect(shortDurationText(ms)).toBe(expected)
     })
   }
+})
+
+const agentInfo = (id: string, status: AgentStatus = 'running', description = `task ${id}`): AgentInfo => ({
+  id,
+  description,
+  type: 'Explore',
+  status,
+})
+
+describe('mergeAgents', () => {
+  test('lists each agent by its description and status', () => {
+    expect(mergeAgents([], [agentInfo('a'), agentInfo('b', 'completed')])).toEqual([
+      { id: 'a', label: 'task a', status: 'running' },
+      { id: 'b', label: 'task b', status: 'completed' },
+    ])
+  })
+
+  test('an agent with no description is labelled by its name, else its type', () => {
+    const named = { ...agentInfo('a', 'idle', ''), name: 'reviewer' }
+    const unnamed = agentInfo('b', 'idle', '')
+    expect(mergeAgents([], [named, unnamed]).map(agent => agent.label)).toEqual(['reviewer', 'Explore'])
+  })
+
+  test('agents keep the order they were first seen in, whatever order they are listed in', () => {
+    const first = mergeAgents([], [agentInfo('a'), agentInfo('b')])
+    const second = mergeAgents(first, [agentInfo('c'), agentInfo('b', 'completed'), agentInfo('a')])
+    expect(second.map(agent => [agent.id, agent.status])).toEqual([
+      ['a', 'running'],
+      ['b', 'completed'],
+      ['c', 'running'],
+    ])
+  })
+
+  test('an agent no longer listed is dropped', () => {
+    const first = mergeAgents([], [agentInfo('a'), agentInfo('b')])
+    expect(mergeAgents(first, [agentInfo('b')]).map(agent => agent.id)).toEqual(['b'])
+  })
+
+  test('an id listed twice is kept once', () => {
+    expect(mergeAgents([], [agentInfo('a'), agentInfo('a', 'completed')])).toEqual([
+      { id: 'a', label: 'task a', status: 'completed' },
+    ])
+  })
+
+  test('an unchanged listing gives back the same list, so nothing is stored or drawn again', () => {
+    const first = mergeAgents([], [agentInfo('a'), agentInfo('b')])
+    expect(mergeAgents(first, [agentInfo('b'), agentInfo('a')])).toBe(first)
+    expect(mergeAgents([], [])).toEqual([])
+  })
 })

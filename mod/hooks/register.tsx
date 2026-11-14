@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Register, Timer } from 'claude-code'
 
-import type { Job, RunningCall, SessionTurn } from '../types'
+import type { Job, ListedAgent, RunningCall, SessionTurn } from '../types'
 import type { FinishedJob } from './progress'
 import { PANE_ID, PANE_TITLE, drawPane } from './pane'
 import { POLL_INTERVAL_MS, pollJobs } from './poll'
@@ -14,7 +14,14 @@ import {
   isWorthNotifying,
   statusSummary,
 } from './progress'
-import { NO_TOOL_CALLS, endTurnCalls, recordEnd, recordStart, toolArgumentText } from './session'
+import {
+  NO_TOOL_CALLS,
+  endTurnCalls,
+  mergeAgents,
+  recordEnd,
+  recordStart,
+  toolArgumentText,
+} from './session'
 
 const COMMAND_NAME = 'progress'
 // A poll still running after this long is logged, once, as stuck.
@@ -50,6 +57,7 @@ const sessionTurn = atom(
   { kind: 'waiting', lastDurationMs: null },
   { shape: 'session-turn-1' },
 )
+const agents = atom({ plugin: 'shell-progress', key: 'agents' } as const, [], { shape: 'agents-1' })
 
 export const register: Register = (on, options) => {
   const stallMs = positiveMinutesOf(options, 'stallMinutes') * MS_PER_MINUTE
@@ -78,17 +86,19 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
-    const [jobList, dir, expanded, dismissed, asked, calls, turn, nowMs, usage] = await Promise.all([
-      read($, jobs),
-      progressDir($),
-      read($, expandedJob),
-      read($, dismissedJobs),
-      read($, askedJobs),
-      read($, toolCalls),
-      read($, sessionTurn),
-      $.clock.now(),
-      $.session.usage(),
-    ])
+    const [jobList, dir, expanded, dismissed, asked, calls, turn, agentList, nowMs, usage] =
+      await Promise.all([
+        read($, jobs),
+        progressDir($),
+        read($, expandedJob),
+        read($, dismissedJobs),
+        read($, askedJobs),
+        read($, toolCalls),
+        read($, sessionTurn),
+        read($, agents),
+        $.clock.now(),
+        $.session.usage(),
+      ])
     return drawPane($.ui.resolve(e), {
       jobs: jobList,
       progressDir: dir,
@@ -99,9 +109,10 @@ export const register: Register = (on, options) => {
       nowMs,
       sessionStartedMs: usage.startedAt,
       stallMs,
-      actions: jobActions($),
+      actions: paneActions($),
       toolCalls: calls,
       turn,
+      agents: agentList,
     })
   })
 }
@@ -155,7 +166,7 @@ function followSession(on: On): void {
   })
 }
 
-function jobActions($: EngineInterface) {
+function paneActions($: EngineInterface) {
   return {
     toggleJob: async (file: string) => {
       await update($, expandedJob, current => (current === file ? null : file))
@@ -171,6 +182,10 @@ function jobActions($: EngineInterface) {
       // Not awaited: a prompt sent while Claude works waits for the session to
       // go idle, and the press should not wait with it.
       void submitQuestion($, job, key)
+    },
+    viewAgent: async ({ id, label }: ListedAgent) => {
+      const shown = await $.ui.view({ agentId: id })
+      if (shown.deny !== undefined) $.ui.toast(`Cannot show ${label}: ${shown.deny}`)
     },
   }
 }
@@ -239,7 +254,8 @@ function startPolling(
   // `null` until the first poll, so a reload always replaces whatever the
   // previous copy of the module left on the status line.
   let shownStatus: string | undefined | null = null
-  let loggedError: string | undefined
+  const jobsFailure = failureLog($, `cannot poll ${dir}`)
+  const agentsFailure = failureLog($, 'cannot list agents')
 
   // The timer lives until the module reloads, which drops it with the
   // environment, so nothing needs to cancel it.
@@ -255,26 +271,47 @@ function startPolling(
     }
     isPolling = true
     skippedTicks = 0
-    // Settled by its own handlers, and the flag keeps polls from overlapping.
-    void pollOnce($, dir, stallMs, notifySeconds)
-      .then(
-        summary => {
-          loggedError = undefined
-          if (summary === shownStatus) return
-          shownStatus = summary
-          $.ui.status(summary)
-        },
-        (error: unknown) => {
-          const message = errorMessage(error)
-          if (message === loggedError) return
-          loggedError = message
-          $.ui.log(`shell-progress: cannot poll ${dir}: ${message}`)
-        },
-      )
-      .finally(() => {
-        isPolling = false
-      })
+    // Each half is settled by its own handlers, so the pair cannot reject, and
+    // the flag keeps polls from overlapping.
+    void Promise.all([
+      pollOnce($, dir, stallMs, notifySeconds).then(summary => {
+        jobsFailure.clear()
+        if (summary === shownStatus) return
+        shownStatus = summary
+        $.ui.status(summary)
+      }, jobsFailure.record),
+      // On a failure the stored agents stay, so the pane keeps the last list.
+      pollAgents($).then(agentsFailure.clear, agentsFailure.record),
+    ]).finally(() => {
+      isPolling = false
+    })
   })
+}
+
+/**
+ * Logs a failure of `work` once, and again only when the message changes or
+ * after a success, so a lasting fault is one line rather than one a poll.
+ */
+function failureLog($: EngineInterface, work: string) {
+  let loggedMessage: string | undefined
+  return {
+    clear: () => {
+      loggedMessage = undefined
+    },
+    record: (error: unknown) => {
+      const message = errorMessage(error)
+      if (message === loggedMessage) return
+      loggedMessage = message
+      $.ui.log(`shell-progress: ${work}: ${message}`)
+    },
+  }
+}
+
+async function pollAgents($: EngineInterface): Promise<void> {
+  const listed = await $.agent.list()
+  const previous = await read($, agents)
+  const merged = mergeAgents(previous, listed)
+  if (merged !== previous) await update($, agents, () => merged)
 }
 
 async function pollOnce(

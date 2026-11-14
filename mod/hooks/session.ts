@@ -1,4 +1,6 @@
-import type { EndedCall, RunningCall, ToolCalls } from '../types'
+import type { AgentInfo } from 'claude-code'
+
+import type { EndedCall, ListedAgent, RunningCall, ToolCalls } from '../types'
 import { MS_PER_SECOND, durationText } from './progress'
 
 /** How many ended calls the pane lists, newest first. */
@@ -60,4 +62,43 @@ export function endTurnCalls(calls: ToolCalls): ToolCalls {
 export function shortDurationText(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / MS_PER_SECOND))
   return seconds < SECONDS_PER_MINUTE ? `${seconds}s` : durationText(seconds)
+}
+
+/**
+ * The agents in `listed`, in the order they were first seen: those in
+ * `previous` keep their place and new ones follow in the order listed, since
+ * the engine does not promise an order. Gives back `previous` itself when
+ * nothing listed changed.
+ */
+export function mergeAgents(
+  previous: readonly ListedAgent[],
+  listed: readonly AgentInfo[],
+): readonly ListedAgent[] {
+  const current = new Map(listed.map(agent => [agent.id, listedAgent(agent)]))
+  const seenIds = new Set(previous.map(agent => agent.id))
+  const merged = [
+    ...previous.flatMap(agent => current.get(agent.id) ?? []),
+    ...[...current.values()].filter(agent => !seenIds.has(agent.id)),
+  ]
+  return isSameAgents(previous, merged) ? previous : merged
+}
+
+function listedAgent(agent: AgentInfo): ListedAgent {
+  const label = [agent.description, agent.name ?? '', agent.type].find(text => text !== '') ?? ''
+  return { id: agent.id, label, status: agent.status }
+}
+
+function isSameAgents(left: readonly ListedAgent[], right: readonly ListedAgent[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((agent, index) => {
+      const other = right[index]
+      return (
+        other !== undefined &&
+        agent.id === other.id &&
+        agent.label === other.label &&
+        agent.status === other.status
+      )
+    })
+  )
 }
