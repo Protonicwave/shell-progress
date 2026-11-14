@@ -128,6 +128,11 @@ describe('mergeAgents', () => {
     expect(mergeAgents([], [named, unnamed]).map(agent => agent.label)).toEqual(['reviewer', 'Explore'])
   })
 
+  test('an agent with no description, name or type is labelled by its id', () => {
+    const blank = { ...agentInfo('a7f3', 'idle', ''), type: '' }
+    expect(mergeAgents([], [blank]).map(agent => agent.label)).toEqual(['a7f3'])
+  })
+
   test('agents keep the order they were first seen in, whatever order they are listed in', () => {
     const first = mergeAgents([], [agentInfo('a'), agentInfo('b')])
     const second = mergeAgents(first, [agentInfo('c'), agentInfo('b', 'completed'), agentInfo('a')])

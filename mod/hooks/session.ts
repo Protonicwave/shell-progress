@@ -84,7 +84,8 @@ export function mergeAgents(
 }
 
 function listedAgent(agent: AgentInfo): ListedAgent {
-  const label = [agent.description, agent.name ?? '', agent.type].find(text => text !== '') ?? ''
+  // Last the id, which tells agents apart where nothing else names them.
+  const label = [agent.description, agent.name ?? '', agent.type].find(text => text !== '') ?? agent.id
   return { id: agent.id, label, status: agent.status }
 }
 
