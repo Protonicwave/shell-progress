@@ -32,6 +32,27 @@ test('the tool.call hook passes on the result the tool gave', async ($, on) => {
   expect(result).toMatchObject({ result: { stdout: 'ok' }, isError: true, text: 'exit 1' })
 })
 
+test('a call whose end the pane cannot record runs once and answers as the tool did', async ($, on) => {
+  fakeWorld(on, new Map())
+  let runs = 0
+  on('tool.call', () => {
+    runs += 1
+    return { result: { stdout: 'ok' } }
+  })
+  // Lets each call's start be recorded and refuses its end, after the tool ran.
+  let writes = 0
+  on('state.set', { plugin: 'shell-progress', key: 'toolCalls' }, (_, e, next) => {
+    writes += 1
+    return writes % 2 === 0 ? { deny: 'store full' } : next(e)
+  })
+  await startSession($)
+
+  for (const command of ['npm test', 'npm run lint']) {
+    expect(await $.tool.call({ tool: 'Bash', command })).toMatchObject({ result: { stdout: 'ok' } })
+  }
+  expect(runs).toBe(2)
+})
+
 test('a call that rejects rejects through the hook and shows as failed', async ($, on) => {
   const { clock } = fakeWorld(on, new Map())
   await startSession($)
