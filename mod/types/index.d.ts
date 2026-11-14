@@ -114,6 +114,8 @@ declare module 'claude-code' {
       limitReadings: Shaped<readonly LimitReading[]>
       /** In the order the mod first saw them, oldest first. */
       agents: Shaped<readonly ListedAgent[]>
+      /** The usage figures the prompt hint ends with, or `null` while it shows none. */
+      hintUsage: string | null
     }
   }
 }

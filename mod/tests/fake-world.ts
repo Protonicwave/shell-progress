@@ -46,6 +46,8 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     openResult: { isPlaced: true } as UiOpenResult,
     /** What each `$.ui.panes` answers; a test may change it. */
     panes: [] as UiPane[],
+    /** Set to make every later `$.ui.panes` reject. */
+    isPanesFailing: false,
     /** Set to make every later listing never settle, as on a hung network share. */
     isListingHung: false,
     /** The mod's `$.store`, which a test may fill before the session starts. */
@@ -105,7 +107,10 @@ export function fakeWorld(on: On, files: Map<string, FakeFile> | undefined) {
     world.opens.push({ id: e.id, columns: e.columns })
     return { value: world.openResult }
   })
-  on('ui.panes', () => ({ value: world.panes }))
+  on('ui.panes', () => {
+    if (world.isPanesFailing) throw new Error('panes unavailable')
+    return { value: world.panes }
+  })
   on('store.get', (_, e) => {
     if (world.isStoreFailing) throw new Error('store unavailable')
     return { value: world.store.get(e.key) }

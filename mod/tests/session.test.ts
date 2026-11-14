@@ -17,7 +17,7 @@ import {
   startTurnContext,
   toolArgumentText,
   usageRows,
-  usageStatusText,
+  usageHintText,
 } from '../hooks/session'
 
 const runningCall = (id: string, startedMs = 0): RunningCall => ({
@@ -407,7 +407,7 @@ describe('costText', () => {
   })
 })
 
-describe('usageStatusText', () => {
+describe('usageHintText', () => {
   test('gives the context, the five-hour limit and the cost', () => {
     const full = usage({
       context: { tokens: 76_000, window: 200_000, percent: 37.6 },
@@ -417,13 +417,13 @@ describe('usageStatusText', () => {
       ],
       cost: { usd: 1.8361 },
     })
-    expect(usageStatusText(full)).toBe('ctx 38% · 5h 63% · $1.84')
+    expect(usageHintText(full)).toBe('ctx 38% · 5h 63% · $1.84')
   })
 
   test('leaves out each figure the session lacks', () => {
-    expect(usageStatusText(usage({ cost: { usd: 0.5 } }))).toBe('$0.50')
+    expect(usageHintText(usage({ cost: { usd: 0.5 } }))).toBe('$0.50')
     const limitOnly = usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 104 }] })
-    expect(usageStatusText(limitOnly)).toBe('5h 104%')
+    expect(usageHintText(limitOnly)).toBe('5h 104%')
   })
 
   test('leaves out a percentage that is not a finite number', () => {
@@ -431,6 +431,6 @@ describe('usageStatusText', () => {
       context: { window: 200_000, percent: Number.NaN },
       rateLimits: [{ kind: 'five_hour', percentUsed: Number.POSITIVE_INFINITY }],
     })
-    expect(usageStatusText(broken)).toBeUndefined()
+    expect(usageHintText(broken)).toBeUndefined()
   })
 })

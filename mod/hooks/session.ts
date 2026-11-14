@@ -262,10 +262,10 @@ function dollarsText(usd: number): string {
 }
 
 /**
- * `ctx 38% · 5h 63% · $1.84`, for the status line while the pane is not in
+ * `ctx 38% · 5h 63% · $1.84`, for the prompt hint while the pane is not in
  * view: each figure the session has, or `undefined` with none.
  */
-export function usageStatusText(usage: SessionUsage): string | undefined {
+export function usageHintText(usage: SessionUsage): string | undefined {
   const percent = contextPercent(usage)
   const limit = fiveHourLimit(usage)
   const figures = [

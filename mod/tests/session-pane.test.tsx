@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { AgentInfo, AgentStatus, ToolCallResult } from 'claude-code'
+import type { AgentInfo, AgentStatus, On, ToolCallResult } from 'claude-code'
 
 import { PANE, POLL_MS, START_MS, fakeWorld, mountPane, runningLine, startSession } from './fake-world'
 
@@ -273,34 +273,97 @@ test('a figure the session lacks leaves its bar or line out', async ($, on) => {
   await ui.unmount()
 })
 
-const HIGH_USAGE_STATUS = 'ctx 85% · 5h 40% · $1.84'
+const HIGH_USAGE_TAIL = ' · ctx 85% · 5h 40% · $1.84'
+const ENGINE_HINT = 'default mode · ? for shortcuts'
 
-test('the status line carries the usage figures only while the pane is not in view', async ($, on) => {
+/**
+ * Stands in for the engine's drawing of the prompt hint and records what the
+ * mod hands it. `draw` raises the hint with `handedTail` as the tail a plugin
+ * above the mod set, and answers what reached the engine.
+ */
+function engineHint(on: On) {
+  const handed: { hint: string; tail: string | undefined }[] = []
+  on('ui.render', { component: 'PromptHint' }, ($, e) => {
+    handed.push({ hint: e.props.hint, tail: e.props.tail })
+    const { Text } = $.ui.resolve(e)
+    return <Text>{e.props.hint}</Text>
+  })
+  const draw = async ($: Engine, handedTail?: string) => {
+    await $.ui.render({
+      surface: 'terminal',
+      component: 'PromptHint',
+      requestId: 'prompt-hint',
+      props: { isDraft: false, isWorking: false, hint: ENGINE_HINT, ...(handedTail === undefined ? {} : { tail: handedTail }) },
+    })
+    return handed.at(-1)
+  }
+  return draw
+}
+
+test('the prompt hint ends with the usage figures only while the pane is not in view', async ($, on) => {
   const { world, clock } = fakeWorld(on, new Map())
+  const drawHint = engineHint(on)
   world.usage = HIGH_USAGE
   await startSession($)
   const pane = { id: PANE.requestId, title: PANE.props.title, isFocused: false }
 
-  await clock.advance(POLL_MS)
-  world.panes = [{ ...pane, isShown: true, isPlaced: true }]
-  await clock.advance(POLL_MS)
-  world.panes = [{ ...pane, isShown: false, isPlaced: true }]
-  await clock.advance(POLL_MS)
-  world.panes = [{ ...pane, isShown: true, isPlaced: true }]
-  await clock.advance(POLL_MS)
-  world.panes = [{ ...pane, isShown: false, isPlaced: false }]
-  await clock.advance(POLL_MS)
-  expect(world.statuses).toEqual([HIGH_USAGE_STATUS, undefined, HIGH_USAGE_STATUS, undefined, HIGH_USAGE_STATUS])
+  const tails: (string | undefined)[] = []
+  for (const shown of [
+    [],
+    [{ ...pane, isShown: true, isPlaced: true }],
+    [{ ...pane, isShown: false, isPlaced: true }],
+    [{ ...pane, isShown: true, isPlaced: true }],
+    [{ ...pane, isShown: false, isPlaced: false }],
+  ]) {
+    world.panes = shown
+    await clock.advance(POLL_MS)
+    tails.push((await drawHint($))?.tail)
+  }
+  expect(tails).toEqual([HIGH_USAGE_TAIL, undefined, HIGH_USAGE_TAIL, undefined, HIGH_USAGE_TAIL])
 })
 
-test('the usage figures follow the running jobs on the status line', async ($, on) => {
+test('the prompt hint keeps the engine\'s text and a tail another plugin added', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  const drawHint = engineHint(on)
+  world.usage = HIGH_USAGE
+  await startSession($)
+
+  await clock.advance(POLL_MS)
+  expect(await drawHint($, 'build 2/3')).toEqual({ hint: ENGINE_HINT, tail: `build 2/3${HIGH_USAGE_TAIL}` })
+})
+
+test('the prompt hint follows the usage and is left alone without figures', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  const drawHint = engineHint(on)
+  await startSession($)
+
+  await clock.advance(POLL_MS)
+  expect(await drawHint($)).toEqual({ hint: ENGINE_HINT, tail: undefined })
+  world.usage = { ...world.usage, cost: { usd: 0.5 } }
+  await clock.advance(POLL_MS)
+  expect((await drawHint($))?.tail).toBe(' · $0.50')
+})
+
+test('the status line carries the running jobs and not the usage figures', async ($, on) => {
   const files = new Map([['build.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS }]])
   const { world, clock } = fakeWorld(on, files)
   world.usage = HIGH_USAGE
   await startSession($)
 
   await clock.advance(POLL_MS)
-  expect(world.statuses).toEqual([`build 50%   ${HIGH_USAGE_STATUS}`])
+  expect(world.statuses).toEqual(['build 50%'])
+})
+
+test('a usage reading that fails is logged once and leaves the jobs polling', async ($, on) => {
+  const files = new Map([['build.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS }]])
+  const { world, clock } = fakeWorld(on, files)
+  world.isPanesFailing = true
+  await startSession($)
+
+  await clock.advance(POLL_MS * 3)
+  expect(world.statuses).toEqual(['build 50%'])
+  expect(world.logs).toHaveLength(1)
+  expect(world.logs[0]).toMatch(/^shell-progress: cannot read usage: /)
 })
 
 const agent = (id: string, description: string, status: AgentStatus = 'running'): AgentInfo => ({

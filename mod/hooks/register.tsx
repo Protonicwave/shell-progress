@@ -28,7 +28,7 @@ import {
   recordStart,
   startTurnContext,
   toolArgumentText,
-  usageStatusText,
+  usageHintText,
 } from './session'
 
 const COMMAND_NAME = 'progress'
@@ -40,9 +40,9 @@ const DISMISSED_STORE_KEY = 'dismissedJobs'
 const MAX_DISMISSED_JOBS = 200
 // A width the person dragged the pane to wins over `columns`.
 const PANE_REQUEST = { id: PANE_ID, title: PANE_TITLE, columns: PANE_COLUMNS } as const
-// Between the jobs and the usage figures on the status line, whose own parts
-// are joined by ` · `.
-const STATUS_GROUP_SEPARATOR = '   '
+// `tail` is drawn at the end of the engine's hint, so it brings its own
+// separator.
+const HINT_TAIL_SEPARATOR = ' · '
 
 // Change the tag when Job's fields change: it declines what an earlier
 // version stored, which outlives a reload.
@@ -75,6 +75,9 @@ const limitReadings = atom({ plugin: 'shell-progress', key: 'limitReadings' } as
   shape: 'limit-readings-1',
 })
 const agents = atom({ plugin: 'shell-progress', key: 'agents' } as const, [], { shape: 'agents-1' })
+// Written only when it changes, so the prompt hint is drawn again once per
+// change rather than once a poll.
+const hintUsage = atom({ plugin: 'shell-progress', key: 'hintUsage' } as const, null)
 
 export const register: Register = (on, options) => {
   const stallMs = positiveMinutesOf(options, 'stallMinutes') * SECONDS_PER_MINUTE * MS_PER_SECOND
@@ -147,6 +150,15 @@ export const register: Register = (on, options) => {
       limitReadings: readings,
       agents: agentList,
     })
+  })
+
+  // Adds to the engine's hint rather than rewriting it, so the permission
+  // mode keeps its colour and the agent count stays live.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const usageText = await read($, hintUsage)
+    if (usageText === null) return next(e)
+    const tail = `${e.props.tail ?? ''}${HINT_TAIL_SEPARATOR}${usageText}`
+    return next({ ...e, props: { ...e.props, tail } })
   })
 }
 
@@ -313,23 +325,24 @@ function startPolling(
   let shownStatus: string | undefined | null = null
   const jobsFailure = failureLog($, `cannot poll ${dir}`)
   const agentsFailure = failureLog($, 'cannot list agents')
-  // Separate, so a hung agent list cannot hold up the jobs, or the reverse.
+  const usageFailure = failureLog($, 'cannot read usage')
+  // Separate, so a hung job poll, agent list or usage reading cannot hold up
+  // the others.
   const tickJobs = unlessUnsettled($, `a poll of ${dir}`, () =>
-    Promise.all([pollOnce($, dir, stallMs, notifySeconds), hiddenPaneUsageText($)]).then(
-      ([jobsText, usageText]) => {
-        jobsFailure.clear()
-        const groups = [jobsText, usageText].filter(group => group !== undefined)
-        const status = groups.length === 0 ? undefined : groups.join(STATUS_GROUP_SEPARATOR)
-        if (status === shownStatus) return
-        shownStatus = status
-        $.ui.status(status)
-      },
-      jobsFailure.record,
-    ),
+    pollOnce($, dir, stallMs, notifySeconds).then(summary => {
+      jobsFailure.clear()
+      if (summary === shownStatus) return
+      shownStatus = summary
+      $.ui.status(summary)
+    }, jobsFailure.record),
   )
   // On a failure the stored agents stay, so the pane keeps the last list.
   const tickAgents = unlessUnsettled($, 'a listing of agents', () =>
     pollAgents($).then(agentsFailure.clear, agentsFailure.record),
+  )
+  // On a failure the hint keeps the last figures.
+  const tickUsage = unlessUnsettled($, 'a reading of usage', () =>
+    pollHintUsage($).then(usageFailure.clear, usageFailure.record),
   )
 
   // The timer lives until the module reloads, which drops it with the
@@ -337,6 +350,7 @@ function startPolling(
   $.clock.every(POLL_INTERVAL_MS, () => {
     tickJobs()
     tickAgents()
+    tickUsage()
   })
 }
 
@@ -417,13 +431,14 @@ async function pollOnce(
 }
 
 /**
- * The usage figures, unless the pane is placed and in front, where its bars
- * already show them.
+ * Stores the usage figures for the prompt hint, or none while the pane is
+ * placed and in front, where its bars already show them.
  */
-async function hiddenPaneUsageText($: EngineInterface): Promise<string | undefined> {
+async function pollHintUsage($: EngineInterface): Promise<void> {
   const [panes, usage] = await Promise.all([$.ui.panes(), $.session.usage()])
   const isPaneInView = panes.some(pane => pane.id === PANE_ID && pane.isPlaced && pane.isShown)
-  return isPaneInView ? undefined : usageStatusText(usage)
+  const text = isPaneInView ? null : (usageHintText(usage) ?? null)
+  if (text !== (await read($, hintUsage))) await update($, hintUsage, () => text)
 }
 
 /** One toast for the jobs that finished, and one notification for those worth one. */
