@@ -24,6 +24,7 @@ import {
   endTurnContext,
   mergeAgents,
   recordEnd,
+  recordLimitReading,
   recordStart,
   startTurnContext,
   toolArgumentText,
@@ -66,6 +67,9 @@ const sessionTurn = atom(
 const turnContext = atom({ plugin: 'shell-progress', key: 'turnContext' } as const, NO_TURN_CONTEXT, {
   shape: 'turn-context-1',
 })
+const limitReadings = atom({ plugin: 'shell-progress', key: 'limitReadings' } as const, [], {
+  shape: 'limit-readings-1',
+})
 const agents = atom({ plugin: 'shell-progress', key: 'agents' } as const, [], { shape: 'agents-1' })
 
 export const register: Register = (on, options) => {
@@ -95,8 +99,20 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
-    const [jobList, dir, expanded, dismissed, asked, calls, turn, context, agentList, nowMs, usage] =
-      await Promise.all([
+    const [
+      jobList,
+      dir,
+      expanded,
+      dismissed,
+      asked,
+      calls,
+      turn,
+      context,
+      readings,
+      agentList,
+      nowMs,
+      usage,
+    ] = await Promise.all([
         read($, jobs),
         progressDir($),
         read($, expandedJob),
@@ -105,6 +121,7 @@ export const register: Register = (on, options) => {
         read($, toolCalls),
         read($, sessionTurn),
         read($, turnContext),
+        read($, limitReadings),
         read($, agents),
         $.clock.now(),
         $.session.usage(),
@@ -123,6 +140,7 @@ export const register: Register = (on, options) => {
       toolCalls: calls,
       turn,
       turnContext: context,
+      limitReadings: readings,
       agents: agentList,
     })
   })
@@ -152,8 +170,9 @@ function followSession(on: On): void {
     turnTimer?.cancel()
     turnTimer = undefined
     await update($, sessionTurn, (): SessionTurn => ({ kind: 'waiting', lastDurationMs: e.durationMs }))
-    const usage = await $.session.usage()
+    const [endedMs, usage] = await Promise.all([$.clock.now(), $.session.usage()])
     await update($, turnContext, context => endTurnContext(context, usage))
+    await update($, limitReadings, readings => recordLimitReading(readings, usage, endedMs))
     await update($, toolCalls, endTurnCalls)
     return next(e)
   })

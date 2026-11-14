@@ -1,16 +1,18 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { AgentInfo, AgentStatus, SessionUsage } from 'claude-code'
 
-import type { EndedCall, RunningCall, ToolCalls } from '../types'
+import type { EndedCall, LimitReading, RunningCall, ToolCalls } from '../types'
 import {
   NO_TOOL_CALLS,
   NO_TURN_CONTEXT,
   costText,
   endTurnContext,
+  limitForecast,
   shortDurationText,
   endTurnCalls,
   mergeAgents,
   recordEnd,
+  recordLimitReading,
   recordStart,
   startTurnContext,
   toolArgumentText,
@@ -164,11 +166,12 @@ describe('mergeAgents', () => {
 
 const RESETS_MS = Date.UTC(2026, 10, 14, 16, 0)
 // The reset is shown in local time, so the expected text is worked out here.
-const resetsClock = (() => {
-  const resets = new Date(RESETS_MS)
+const localClock = (ms: number) => {
+  const time = new Date(ms)
   const pad = (value: number) => String(value).padStart(2, '0')
-  return `${pad(resets.getHours())}:${pad(resets.getMinutes())}`
-})()
+  return `${pad(time.getHours())}:${pad(time.getMinutes())}`
+}
+const resetsClock = localClock(RESETS_MS)
 
 const usage = (fields: Partial<SessionUsage>): SessionUsage => ({
   startedAt: 0,
@@ -188,10 +191,12 @@ describe('usageRows', () => {
         ],
       }),
       null,
+      [],
+      0,
     )
     expect(rows).toEqual([
-      { label: 'context', fraction: 0.38, figures: '38% · 76k of 200k' },
-      { label: '5h limit', fraction: 0.635, figures: `64% · resets ${resetsClock}` },
+      { label: 'context', fraction: 0.38, figures: '38% · 76k of 200k', isWarning: false },
+      { label: '5h limit', fraction: 0.635, figures: `64% · resets ${resetsClock}`, isWarning: false },
     ])
   })
 
@@ -202,12 +207,14 @@ describe('usageRows', () => {
         rateLimits: [{ kind: 'five_hour', percentUsed: Number.POSITIVE_INFINITY }],
       }),
       null,
+      [],
+      0,
     )
     expect(rows).toEqual([])
   })
 
   test('a fresh session with no limit reading has no bars', () => {
-    expect(usageRows(usage({}), null)).toEqual([])
+    expect(usageRows(usage({}), null, [], 0)).toEqual([])
   })
 
   test('a context reading without tokens, or a limit without a reset, shows the percentage alone', () => {
@@ -217,29 +224,33 @@ describe('usageRows', () => {
         rateLimits: [{ kind: 'five_hour', percentUsed: 7 }],
       }),
       null,
+      [],
+      0,
     )
     expect(rows.map(row => row.figures)).toEqual(['5%', '7%'])
   })
 
   test('a reset time that is not a date is left out', () => {
-    const rows = usageRows(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 7, resetsAt: 'soon' }] }), null)
+    const soon = usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 7, resetsAt: 'soon' }] })
+    const rows = usageRows(soon, null, [], 0)
     expect(rows.map(row => row.figures)).toEqual(['7%'])
   })
 
   test('a window of a million tokens or more is counted in millions', () => {
-    const rows = usageRows(usage({ context: { tokens: 250_000, window: 1_000_000, percent: 25 } }), null)
+    const million = usage({ context: { tokens: 250_000, window: 1_000_000, percent: 25 } })
+    const rows = usageRows(million, null, [], 0)
     expect(rows[0]?.figures).toBe('25% · 250k of 1M')
   })
 
   test('a limit past 100% fills its bar and no more', () => {
-    const rows = usageRows(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 104 }] }), null)
-    expect(rows[0]).toEqual({ label: '5h limit', fraction: 1, figures: '104%' })
+    const rows = usageRows(usage({ rateLimits: [{ kind: 'five_hour', percentUsed: 104 }] }), null, [], 0)
+    expect(rows[0]).toEqual({ label: '5h limit', fraction: 1, figures: '104%', isWarning: false })
   })
 })
 
 describe('usageRows with the context the last turn added', () => {
-  const contextOf = (lastAddedTokens: number | null) =>
-    usageRows(usage({ context: { tokens: 88_000, window: 200_000, percent: 44 } }), lastAddedTokens)[0]?.figures
+  const at88k = usage({ context: { tokens: 88_000, window: 200_000, percent: 44 } })
+  const contextOf = (lastAddedTokens: number | null) => usageRows(at88k, lastAddedTokens, [], 0)[0]?.figures
 
   test('ends the context figures with what the turn added', () => {
     expect(contextOf(12_400)).toBe('44% · 88k of 200k · +12k')
@@ -254,6 +265,110 @@ describe('usageRows with the context the last turn added', () => {
       expect(contextOf(added)).toBe('44% · 88k of 200k')
     })
   }
+})
+
+const MINUTE_MS = 60_000
+const reading = (minutesBeforeReset: number, percentUsed: number, resetsMs = RESETS_MS): LimitReading => ({
+  atMs: RESETS_MS - minutesBeforeReset * MINUTE_MS,
+  percentUsed,
+  resetsMs,
+})
+
+describe('limitForecast', () => {
+  // 10 points in 20 minutes: the 40 left take 80 minutes from the newest reading.
+  const rising = [reading(120, 50), reading(100, 60)]
+  const newestMs = RESETS_MS - 100 * MINUTE_MS
+
+  test('projects the rate between two readings to when the limit fills', () => {
+    expect(limitForecast(rising, newestMs, RESETS_MS)).toBe(newestMs + 80 * MINUTE_MS)
+  })
+
+  test('takes the rate from the newest reading at least 5 minutes before the newest', () => {
+    const readings = [reading(160, 10), reading(120, 50), reading(103, 59), reading(100, 60)]
+    expect(limitForecast(readings, newestMs, RESETS_MS)).toBe(newestMs + 80 * MINUTE_MS)
+  })
+
+  test('gives none for readings under 5 minutes apart', () => {
+    expect(limitForecast([reading(104, 50), reading(100, 60)], newestMs, RESETS_MS)).toBeNull()
+  })
+
+  test('gives none for a single reading or none', () => {
+    expect(limitForecast([reading(100, 60)], newestMs, RESETS_MS)).toBeNull()
+    expect(limitForecast([], newestMs, RESETS_MS)).toBeNull()
+  })
+
+  test('gives none for a percentage that held or fell', () => {
+    expect(limitForecast([reading(120, 60), reading(100, 60)], newestMs, RESETS_MS)).toBeNull()
+    expect(limitForecast([reading(120, 70), reading(100, 60)], newestMs, RESETS_MS)).toBeNull()
+  })
+
+  test('gives none when the limit resets before it would fill', () => {
+    const late = [reading(60, 50), reading(40, 60)]
+    expect(limitForecast(late, RESETS_MS - 40 * MINUTE_MS, RESETS_MS)).toBeNull()
+  })
+
+  test('gives none once the reset has passed', () => {
+    expect(limitForecast(rising, RESETS_MS, RESETS_MS)).toBeNull()
+  })
+
+  test('gives none for a fill time already past', () => {
+    expect(limitForecast(rising, newestMs + 81 * MINUTE_MS, RESETS_MS)).toBeNull()
+  })
+
+  test('gives none for a limit already full', () => {
+    expect(limitForecast([reading(120, 90), reading(100, 100)], newestMs, RESETS_MS)).toBeNull()
+  })
+
+  test('leaves out readings from an earlier window', () => {
+    const earlierResetMs = RESETS_MS - 300 * MINUTE_MS
+    const readings = [reading(120, 5, earlierResetMs), reading(100, 60)]
+    expect(limitForecast(readings, newestMs, RESETS_MS)).toBeNull()
+  })
+})
+
+describe('recordLimitReading', () => {
+  const fiveHour = (percentUsed: number, resetsAt?: string) =>
+    usage({
+      rateLimits: [{ kind: 'five_hour', percentUsed, ...(resetsAt === undefined ? {} : { resetsAt }) }],
+    })
+
+  test('adds the five-hour reading with when it was taken', () => {
+    const recorded = recordLimitReading([], fiveHour(42.5, new Date(RESETS_MS).toISOString()), 1_000)
+    expect(recorded).toEqual([{ atMs: 1_000, percentUsed: 42.5, resetsMs: RESETS_MS }])
+  })
+
+  test('adds nothing for a limit with no reset, a reset that is not a date, or no limit', () => {
+    expect(recordLimitReading([], fiveHour(42), 1_000)).toEqual([])
+    expect(recordLimitReading([], fiveHour(42, 'soon'), 1_000)).toEqual([])
+    expect(recordLimitReading([], fiveHour(Number.NaN, new Date(RESETS_MS).toISOString()), 1_000)).toEqual([])
+    expect(recordLimitReading([], usage({}), 1_000)).toEqual([])
+  })
+
+  test('keeps the newest 20', () => {
+    const resetsAt = new Date(RESETS_MS).toISOString()
+    let readings: readonly LimitReading[] = []
+    for (let turn = 0; turn < 25; turn += 1) {
+      readings = recordLimitReading(readings, fiveHour(turn, resetsAt), turn)
+    }
+    expect(readings.map(one => one.atMs)).toEqual(Array.from({ length: 20 }, (_, index) => index + 5))
+  })
+})
+
+describe('usageRows with a forecast', () => {
+  const at = (percentUsed: number) =>
+    usage({ rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt: new Date(RESETS_MS).toISOString() }] })
+  const newestMs = RESETS_MS - 100 * MINUTE_MS
+
+  test('gives the time the limit fills, in place of the reset, as a warning', () => {
+    const rows = usageRows(at(60), null, [reading(120, 50), reading(100, 60)], newestMs)
+    const fullClock = localClock(newestMs + 80 * MINUTE_MS)
+    expect(rows[0]).toMatchObject({ figures: `60% · full by ${fullClock}`, isWarning: true })
+  })
+
+  test('keeps the reset time when the limit resets first', () => {
+    const rows = usageRows(at(60), null, [reading(120, 58), reading(100, 60)], newestMs)
+    expect(rows[0]).toMatchObject({ figures: `60% · resets ${resetsClock}`, isWarning: false })
+  })
 })
 
 describe('turn context', () => {

@@ -147,16 +147,21 @@ for a teammate that runs in a terminal pane of its own. An agent leaves the
 list when Claude Code stops tracking it, shortly after it ends.
 
 At the foot of the pane, a bar shows how full the context window is, such as
-`38% · 76k of 200k`, and another how much of the five-hour usage limit is
-used and when it resets, such as `63% · resets 16:00`. Once a turn has
-ended, the context figures end with what it added to the context, such as
-`+12k`, or `-61k` for a turn that compacted it; a turn that added under 500
-tokens shows none. Each bar shares a row
-with its label and figures; in a pane narrower than 40 columns it takes a row
-of its own under them. Either bar takes the theme's warning colour from 80%. Below them is the session's cost so far, as
-`/cost` totals it. A figure Claude Code does not have is left out: the context
-bar appears after the session's first response, and the limit bar only on a
-subscription.
+`38% · 76k of 200k`, and another how much of the five-hour usage limit is used
+and when it resets, such as `63% · resets 16:00`. Each bar shares a row with
+its label and figures; in a pane narrower than 40 columns it takes a row of
+its own under them. Either bar takes the theme's warning colour from 80%.
+Below them is the session's cost so far, as `/cost` totals it. A figure Claude
+Code does not have is left out: the context bar appears after the session's
+first response, and the limit bar only on a subscription.
+
+Once a turn has ended, the context figures end with what it added to the
+context, such as `+12k`, or `-61k` for a turn that compacted it. A turn that
+added under 500 tokens shows nothing. The mod also reads the five-hour limit
+at the end of each turn. When the rate between the newest reading and one at
+least 5 minutes older says the limit fills before it resets, its figures give
+that time in the warning colour instead of the reset, such as
+`82% · full by 14:39`.
 
 Under Jobs, the pane lists each running job with a bar, its step and total, its label and
 the time since it started. From its third step a job also shows about how long

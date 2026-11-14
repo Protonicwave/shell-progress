@@ -214,6 +214,33 @@ test('the context figures end with what the last turn added', async ($, on) => {
   await ui.unmount()
 })
 
+test('the limit figures give the time it fills, as a warning, if that is before the reset', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  const minuteMs = 60_000
+  const resetsAt = new Date(START_MS + 300 * minuteMs).toISOString()
+  const limitAt = (percentUsed: number) => ({
+    startedAt: START_MS,
+    context: { window: 200_000 },
+    rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt }],
+  })
+  await startSession($)
+  world.usage = limitAt(50)
+  await startTurn($)
+  await completeTurn($, 1_000)
+  await clock.advance(5 * minuteMs)
+  world.usage = limitAt(60)
+  await startTurn($)
+  await completeTurn($, 1_000)
+
+  // 10 points in 5 minutes: the 40 left take 20 minutes from the second turn's end.
+  const fullClock = new Date(START_MS + 25 * minuteMs).toTimeString().slice(0, 5)
+  const ui = await mountPane($)
+  const figures = await ui.find({ type: 'Text', text: /^60% · / })
+  expect(figures?.text).toBe(`60% · full by ${fullClock}`)
+  expect(figures?.props['color']).toBe('warning')
+  await ui.unmount()
+})
+
 test('below 40 columns each usage bar takes a row of its own under its label and figures', async ($, on) => {
   const { world } = fakeWorld(on, new Map())
   world.usage = HIGH_USAGE

@@ -79,6 +79,14 @@ export type TurnContext = {
   readonly lastAddedTokens: number | null
 }
 
+/** The five-hour limit as it stood when a main turn ended. */
+export type LimitReading = {
+  readonly atMs: number
+  readonly percentUsed: number
+  /** When the window the reading belongs to resets. */
+  readonly resetsMs: number
+}
+
 /** Whether the main conversation's turn is running, and how long the last one took. */
 export type SessionTurn =
   | { readonly kind: 'running'; readonly startedMs: number }
@@ -102,6 +110,8 @@ declare module 'claude-code' {
       toolCalls: Shaped<ToolCalls>
       sessionTurn: Shaped<SessionTurn>
       turnContext: Shaped<TurnContext>
+      /** Oldest first. */
+      limitReadings: Shaped<readonly LimitReading[]>
       /** In the order the mod first saw them, oldest first. */
       agents: Shaped<readonly ListedAgent[]>
     }

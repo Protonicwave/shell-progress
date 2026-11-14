@@ -1,6 +1,6 @@
-import type { AgentInfo, SessionUsage } from 'claude-code'
+import type { AgentInfo, SessionRateLimit, SessionUsage } from 'claude-code'
 
-import type { EndedCall, ListedAgent, RunningCall, ToolCalls, TurnContext } from '../types'
+import type { EndedCall, LimitReading, ListedAgent, RunningCall, ToolCalls, TurnContext } from '../types'
 import { MS_PER_SECOND, SECONDS_PER_MINUTE, clockTimeText, durationText } from './progress'
 
 /** How many ended calls the pane lists, newest first. */
@@ -109,12 +109,19 @@ export type UsageRow = {
   /** From 0 to 1; a limit past 100% fills the bar. */
   readonly fraction: number
   readonly figures: string
+  /** Set when the figures say the limit fills before it resets. */
+  readonly isWarning: boolean
 }
 
 const PERCENT = 100
 const TOKENS_PER_THOUSAND = 1_000
 const TOKENS_PER_MILLION = 1_000_000
 const FIVE_HOUR_LIMIT_KIND = 'five_hour'
+// Readings closer together than this give too rough a rate to project.
+const MIN_FORECAST_SPAN_MS = 5 * SECONDS_PER_MINUTE * MS_PER_SECOND
+// One reading per turn. The forecast reads only the newest few, so past this
+// many the oldest are dropped.
+const MAX_LIMIT_READINGS = 20
 
 export const NO_TURN_CONTEXT: TurnContext = { startTokens: null, lastAddedTokens: null }
 
@@ -136,9 +143,16 @@ export function endTurnContext(context: TurnContext, usage: SessionUsage): TurnC
  * The context window's bar and the five-hour limit's, each only when the
  * session has its reading: none before the first response, no limit off a
  * subscription, and neither for a percentage that is not a finite number.
- * The context figures end with `lastAddedTokens`, unless it rounds to none.
+ * The context figures end with `lastAddedTokens`, unless it rounds to none,
+ * and the limit's give the time `limitReadings` say it fills, if that comes
+ * before its reset.
  */
-export function usageRows(usage: SessionUsage, lastAddedTokens: number | null): readonly UsageRow[] {
+export function usageRows(
+  usage: SessionUsage,
+  lastAddedTokens: number | null,
+  limitReadings: readonly LimitReading[],
+  nowMs: number,
+): readonly UsageRow[] {
   const rows: UsageRow[] = []
   const { tokens, window, percent } = usage.context
   if (percent !== undefined && Number.isFinite(percent)) {
@@ -147,19 +161,68 @@ export function usageRows(usage: SessionUsage, lastAddedTokens: number | null): 
   }
   const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
   if (limit !== undefined && Number.isFinite(limit.percentUsed)) {
-    const resetsMs = limit.resetsAt === undefined ? Number.NaN : Date.parse(limit.resetsAt)
-    const resetFigures = Number.isNaN(resetsMs) ? '' : ` · resets ${clockTimeText(resetsMs, false)}`
-    rows.push(usageRow('5h limit', limit.percentUsed, resetFigures))
+    const resetsMs = resetsMsOf(limit)
+    if (resetsMs === undefined) {
+      rows.push(usageRow('5h limit', limit.percentUsed, ''))
+    } else {
+      const fullMs = limitForecast(limitReadings, nowMs, resetsMs)
+      const laterFigures =
+        fullMs === null
+          ? ` · resets ${clockTimeText(resetsMs, false)}`
+          : ` · full by ${clockTimeText(fullMs, false)}`
+      rows.push(usageRow('5h limit', limit.percentUsed, laterFigures, fullMs !== null))
+    }
   }
   return rows
 }
 
+function resetsMsOf(limit: SessionRateLimit): number | undefined {
+  const resetsMs = limit.resetsAt === undefined ? Number.NaN : Date.parse(limit.resetsAt)
+  return Number.isNaN(resetsMs) ? undefined : resetsMs
+}
+
+/** Adds the five-hour reading, when the session has one with a reset time. */
+export function recordLimitReading(
+  readings: readonly LimitReading[],
+  usage: SessionUsage,
+  nowMs: number,
+): readonly LimitReading[] {
+  const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
+  if (limit === undefined || !Number.isFinite(limit.percentUsed)) return readings
+  const resetsMs = resetsMsOf(limit)
+  if (resetsMs === undefined) return readings
+  return [...readings, { atMs: nowMs, percentUsed: limit.percentUsed, resetsMs }].slice(-MAX_LIMIT_READINGS)
+}
+
+/**
+ * When the five-hour limit that resets at `resetsMs` fills, at the rate
+ * between its newest reading and the newest one at least
+ * MIN_FORECAST_SPAN_MS before it. `null` when no such pair exists, the
+ * percentage did not rise, the limit is full, or the fill time is not
+ * between now and the reset. Readings from another window are left out.
+ */
+export function limitForecast(
+  readings: readonly LimitReading[],
+  nowMs: number,
+  resetsMs: number,
+): number | null {
+  const sameWindow = readings.filter(one => one.resetsMs === resetsMs)
+  const newest = sameWindow.at(-1)
+  if (newest === undefined || newest.percentUsed >= PERCENT) return null
+  const older = sameWindow.findLast(one => newest.atMs - one.atMs >= MIN_FORECAST_SPAN_MS)
+  if (older === undefined || newest.percentUsed <= older.percentUsed) return null
+  const percentPerMs = (newest.percentUsed - older.percentUsed) / (newest.atMs - older.atMs)
+  const fullMs = newest.atMs + (PERCENT - newest.percentUsed) / percentPerMs
+  return fullMs > nowMs && fullMs < resetsMs ? fullMs : null
+}
+
 /** A bar for `percent`, its figures the rounded percentage then `laterFigures`. */
-function usageRow(label: string, percent: number, laterFigures: string): UsageRow {
+function usageRow(label: string, percent: number, laterFigures: string, isWarning = false): UsageRow {
   return {
     label,
     fraction: Math.min(1, Math.max(0, percent / PERCENT)),
     figures: `${Math.round(percent)}%${laterFigures}`,
+    isWarning,
   }
 }
 

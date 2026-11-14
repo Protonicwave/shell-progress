@@ -1,6 +1,15 @@
 import type { Color, Elements, RenderNode, SessionUsage } from 'claude-code'
 
-import type { EndedCall, Job, ListedAgent, RunningCall, SessionTurn, ToolCalls, TurnContext } from '../types'
+import type {
+  EndedCall,
+  Job,
+  LimitReading,
+  ListedAgent,
+  RunningCall,
+  SessionTurn,
+  ToolCalls,
+  TurnContext,
+} from '../types'
 import { POLL_INTERVAL_MS } from './poll'
 import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
 import {
@@ -48,6 +57,7 @@ const STALLED_COLOUR: Color = 'warning'
 const DONE_COLOUR: Color = 'success'
 const FAILED_COLOUR: Color = 'error'
 const HIGH_USAGE_COLOUR: Color = 'warning'
+const WARNING_FIGURES_COLOUR: Color = 'warning'
 
 /** The elements the pane draws with, which every surface's table holds. */
 type PaneElements = Pick<Elements['terminal'], 'Box' | 'Button' | 'Text'>
@@ -80,6 +90,8 @@ type PaneView = {
   readonly toolCalls: ToolCalls
   readonly turn: SessionTurn
   readonly turnContext: TurnContext
+  /** Oldest first. */
+  readonly limitReadings: readonly LimitReading[]
   /** Oldest first. */
   readonly agents: readonly ListedAgent[]
 }
@@ -218,7 +230,7 @@ function recentGroup(ui: PaneElements, calls: readonly EndedCall[]): RenderNode 
  */
 function usageGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   const { Box, Text } = ui
-  const rows = usageRows(view.usage, view.turnContext.lastAddedTokens)
+  const rows = usageRows(view.usage, view.turnContext.lastAddedTokens, view.limitReadings, view.nowMs)
   const cost = costText(view.usage)
   if (rows.length === 0 && cost === undefined) return undefined
   const drawRow =
@@ -242,7 +254,7 @@ function oneUsageRow(ui: PaneElements, cells: number) {
         <Text dimColor>{row.label}</Text>
       </Box>
       {barRow(ui, row.fraction, cells, usageColour(row))}
-      <Text dimColor>{row.figures}</Text>
+      {usageFigures(ui, row)}
     </Box>
   )
 }
@@ -251,7 +263,7 @@ function twoUsageRows(ui: PaneElements, cells: number, row: UsageRow) {
   const { Box, Text } = ui
   return (
     <Box key={row.label} flexDirection="column">
-      {spreadRow(ui, <Text dimColor>{row.label}</Text>, <Text dimColor>{row.figures}</Text>)}
+      {spreadRow(ui, <Text dimColor>{row.label}</Text>, usageFigures(ui, row))}
       {barRow(ui, row.fraction, cells, usageColour(row))}
     </Box>
   )
@@ -262,6 +274,14 @@ function oneRowBarCells(bodyColumns: number, rows: readonly UsageRow[]): number 
   const figuresColumns = Math.max(...rows.map(row => row.figures.length))
   const free = bodyColumns - USAGE_LABEL_COLUMNS - figuresColumns - 2 * USAGE_GAP_COLUMNS
   return Math.max(1, Math.min(MAX_BAR_CELLS, free))
+}
+
+function usageFigures({ Text }: PaneElements, row: UsageRow) {
+  return row.isWarning ? (
+    <Text color={WARNING_FIGURES_COLOUR}>{row.figures}</Text>
+  ) : (
+    <Text dimColor>{row.figures}</Text>
+  )
 }
 
 function usageColour(row: UsageRow): Color {
