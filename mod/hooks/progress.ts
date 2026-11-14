@@ -9,7 +9,7 @@ const MAX_SHOWN_FINISHED_JOBS = 5
 const FIRST_ESTIMATED_STEP = 3
 // An estimate finer than this claims more than an average of steps can know.
 const REMAINING_ROUNDING_SECONDS = 5
-const SECONDS_PER_MINUTE = 60
+export const SECONDS_PER_MINUTE = 60
 const SECONDS_PER_HOUR = 3600
 export const MS_PER_SECOND = 1000
 
@@ -137,6 +137,12 @@ export function durationText(seconds: number): string {
   }
   const minutes = Math.floor((whole % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)
   return `${Math.floor(whole / SECONDS_PER_HOUR)}h ${twoDigits(minutes)}m`
+}
+
+/** The local time of day at `ms`: `14:02:31`, or `14:02` without seconds. */
+export function clockTimeText(ms: number, hasSeconds: boolean): string {
+  // ECMA-262 fixes toTimeString's form as `HH:mm:ss GMT+hhmm (zone)`.
+  return new Date(ms).toTimeString().slice(0, hasSeconds ? 8 : 5)
 }
 
 function twoDigits(value: number): string {

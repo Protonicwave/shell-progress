@@ -6,6 +6,8 @@ import type { FinishedJob } from './progress'
 import { PANE_ID, PANE_TITLE, drawPane } from './pane'
 import { POLL_INTERVAL_MS, pollJobs } from './poll'
 import {
+  MS_PER_SECOND,
+  SECONDS_PER_MINUTE,
   announcementText,
   askClaudeText,
   runKey,
@@ -27,8 +29,6 @@ import {
 const COMMAND_NAME = 'progress'
 // A poll still running after this long is logged, once, as stuck.
 const STUCK_POLL_MS = 30_000
-const MS_PER_MINUTE = 60_000
-const SECONDS_PER_MINUTE = 60
 const DISMISSED_STORE_KEY = 'dismissedJobs'
 // A run key names one run, so an old key never hides a new job; past
 // this many, the oldest are dropped, which only brings their jobs back.
@@ -61,7 +61,7 @@ const sessionTurn = atom(
 const agents = atom({ plugin: 'shell-progress', key: 'agents' } as const, [], { shape: 'agents-1' })
 
 export const register: Register = (on, options) => {
-  const stallMs = positiveMinutesOf(options, 'stallMinutes') * MS_PER_MINUTE
+  const stallMs = positiveMinutesOf(options, 'stallMinutes') * SECONDS_PER_MINUTE * MS_PER_SECOND
   const notifySeconds = positiveMinutesOf(options, 'notifyMinutes') * SECONDS_PER_MINUTE
 
   on('session.start', async ($, e, next) => {
@@ -312,7 +312,7 @@ function unlessUnsettled($: EngineInterface, work: string, run: () => Promise<vo
     if (isRunning) {
       skippedTicks += 1
       if (skippedTicks === Math.ceil(STUCK_POLL_MS / POLL_INTERVAL_MS)) {
-        $.ui.log(`shell-progress: ${work} has not finished after ${STUCK_POLL_MS / 1000}s`)
+        $.ui.log(`shell-progress: ${work} has not finished after ${STUCK_POLL_MS / MS_PER_SECOND}s`)
       }
       return
     }

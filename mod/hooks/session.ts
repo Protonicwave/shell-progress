@@ -1,14 +1,13 @@
 import type { AgentInfo, SessionUsage } from 'claude-code'
 
 import type { EndedCall, ListedAgent, RunningCall, ToolCalls } from '../types'
-import { MS_PER_SECOND, durationText } from './progress'
+import { MS_PER_SECOND, SECONDS_PER_MINUTE, clockTimeText, durationText } from './progress'
 
 /** How many ended calls the pane lists, newest first. */
 export const RECENT_CALL_COUNT = 3
 // Parallel calls are few; past this the oldest is dropped, as the end of the
 // turn would drop it, so a call whose end is never heard cannot grow the list.
 const MAX_RUNNING_CALLS = 20
-const SECONDS_PER_MINUTE = 60
 
 export const NO_TOOL_CALLS: ToolCalls = { running: [], recent: [] }
 
@@ -131,10 +130,8 @@ export function usageBars(usage: SessionUsage): readonly UsageBar[] {
   }
   const limit = usage.rateLimits.find(one => one.kind === FIVE_HOUR_LIMIT_KIND)
   if (limit !== undefined && Number.isFinite(limit.percentUsed)) {
-    const resets = limit.resetsAt === undefined ? undefined : new Date(limit.resetsAt)
-    const isValid = resets !== undefined && !Number.isNaN(resets.getTime())
-    // ECMA-262 fixes toTimeString's form as `HH:mm:ss GMT+hhmm (zone)`.
-    const when = isValid ? ` · resets ${resets.toTimeString().slice(0, 5)}` : ''
+    const resetsMs = limit.resetsAt === undefined ? Number.NaN : Date.parse(limit.resetsAt)
+    const when = Number.isNaN(resetsMs) ? '' : ` · resets ${clockTimeText(resetsMs, false)}`
     bars.push(usageBar('5-hour limit', limit.percentUsed, when))
   }
   return bars

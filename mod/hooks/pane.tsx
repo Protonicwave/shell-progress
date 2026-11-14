@@ -6,6 +6,7 @@ import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
 import {
   MS_PER_SECOND,
   barText,
+  clockTimeText,
   durationText,
   finishedText,
   isStalled,
@@ -388,7 +389,7 @@ function nameButton({ Button }: PaneElements, view: PaneView, job: Job) {
 function jobDetails(ui: PaneElements, view: PaneView, job: Job, canDismiss: boolean) {
   const { Box, Button, Text } = ui
   const facts = [`pid ${job.pid}`]
-  if (job.line !== null) facts.push(`started ${clockTimeText(job.line.startedSec)}`)
+  if (job.line !== null) facts.push(`started ${clockTimeText(job.line.startedSec * MS_PER_SECOND, true)}`)
   if (job.line?.kind === 'finished') facts.push(`exit ${job.line.exitCode}`)
   const key = canDismiss ? runKey(job) : undefined
   return (
@@ -419,12 +420,6 @@ function askClaudeControl({ Button, Text }: PaneElements, view: PaneView, job: F
       onPress={() => view.actions.askClaude(job)}
     />
   )
-}
-
-/** The local time of day, `14:02:31`. */
-function clockTimeText(epochSec: number): string {
-  // ECMA-262 fixes toTimeString's form as `HH:mm:ss GMT+hhmm (zone)`.
-  return new Date(epochSec * MS_PER_SECOND).toTimeString().slice(0, 8)
 }
 
 /**
