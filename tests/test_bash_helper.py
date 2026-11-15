@@ -10,7 +10,23 @@ import unittest
 from pathlib import Path
 
 HELPER = Path(__file__).resolve().parent.parent / "helpers" / "progress.sh"
-BASH = shutil.which("bash")
+
+
+def bash_path() -> str | None:
+    """The bash on PATH, or the one that Git's bin/bash.exe launcher starts.
+
+    The launcher runs usr/bin/bash.exe as its child, so a script started
+    through it runs under a pid other than the one Popen reports.
+    """
+    found = shutil.which("bash")
+    if found is None:
+        return None
+    launched = Path(found).parent.parent / "usr" / "bin" / "bash.exe"
+    is_git_launcher = Path(found).parent.name.lower() == "bin" and launched.is_file()
+    return str(launched) if is_git_launcher else found
+
+
+BASH = bash_path()
 SUBPROCESS_TIMEOUT_SECONDS = 60
 SECONDS_PER_HOUR = 3600
 CLEANUP_MAX_FILES = 500
@@ -162,7 +178,7 @@ class BashHelperTests(unittest.TestCase):
             'echo "seen:$(<"${file[0]}")"\n'
             "sleep 1.2\n"
             "progress 2 3 second\n"
-            'echo "seen:$(<"$file")"'
+            'echo "seen:$(<"${file[0]}")"'
         )
         result = self.run_job(body, keep_running=True)
         seen = [line[len("seen:") :] for line in result.stdout.splitlines() if line.startswith("seen:")]
