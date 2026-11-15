@@ -6,10 +6,8 @@ import {
   machineText,
   machineWarnings,
   parseSample,
-  processState,
   processStates,
   takeLines,
-  treeCpu,
 } from '../hooks/machine'
 
 const AT_MS = 1_700_000_000_000
@@ -196,113 +194,118 @@ const process = (pid: number, parentPid: number, cpuMs: number, startedMs = ROOT
 })
 const reading = (sampledMs: number, processes: readonly ProcessReading[]) =>
   sample({ atMs: sampledMs, sampledMs, cpuCount: 8, processes })
+const job = (file: string, kind: 'running' | 'finished'): Job => ({
+  file,
+  script: 'build.sh',
+  pid: file.replace(/\D/g, ''),
+  mtimeMs: BEFORE_MS,
+  line:
+    kind === 'running'
+      ? { kind: 'running', startedSec: STARTED_SEC, step: 1, total: 4, label: '' }
+      : { kind: 'finished', startedSec: STARTED_SEC, exitCode: 0, endedSec: STARTED_SEC + 9 },
+  lastLabel: '',
+})
+const ROOT_JOB = job('build.sh-10.txt', 'running')
+/** The state of the job whose process is pid 10, between two readings. */
+const stateBetween = (before: MachineSample, after: MachineSample) =>
+  processStates([ROOT_JOB], { previous: before, current: after }, after.atMs).get(ROOT_JOB.file)
+/** The CPU of that job's process tree, or `undefined` once its process has ended. */
+const cpuBetween = (before: MachineSample, after: MachineSample) => {
+  const state = stateBetween(before, after)
+  return state?.kind === 'ended' ? undefined : state?.cpuPercent
+}
 
-describe('treeCpu', () => {
+describe("the CPU of a job's process tree", () => {
   test('sums the root and its descendants as a share of all cores', () => {
     const before = reading(BEFORE_MS, [process(10, 1, 1000), process(11, 10, 0), process(12, 11, 500)])
     const after = reading(AFTER_MS, [process(10, 1, 2000), process(11, 10, 2000), process(12, 11, 1500)])
     // 4000 ms of CPU over 5000 ms on 8 cores.
-    expect(treeCpu(before, after, 10)).toBe(10)
+    expect(cpuBetween(before, after)).toBe(10)
   })
 
   test("leaves out other trees, including the root's parent", () => {
     const before = reading(BEFORE_MS, [process(1, 0, 0), process(10, 1, 0), process(20, 1, 0)])
     const after = reading(AFTER_MS, [process(1, 0, 9000), process(10, 1, 2000), process(20, 1, 9000)])
-    expect(treeCpu(before, after, 10)).toBe(5)
+    expect(cpuBetween(before, after)).toBe(5)
   })
 
   test('counts all the CPU of a process started since the previous reading', () => {
     const before = reading(BEFORE_MS, [process(10, 1, 0)])
     const after = reading(AFTER_MS, [process(10, 1, 0), process(11, 10, 4000, BEFORE_MS + 1)])
-    expect(treeCpu(before, after, 10)).toBe(10)
+    expect(cpuBetween(before, after)).toBe(10)
   })
 
   test('survives a process that ended between the readings', () => {
     const before = reading(BEFORE_MS, [process(10, 1, 0), process(11, 10, 3000)])
     const after = reading(AFTER_MS, [process(10, 1, 2000)])
-    expect(treeCpu(before, after, 10)).toBe(5)
+    expect(cpuBetween(before, after)).toBe(5)
   })
 
   test('takes a reused pid as a new process', () => {
     const before = reading(BEFORE_MS, [process(10, 1, 0), process(11, 10, 9000)])
     const after = reading(AFTER_MS, [process(10, 1, 0), process(11, 10, 2000, BEFORE_MS + 1)])
-    expect(treeCpu(before, after, 10)).toBe(5)
+    expect(cpuBetween(before, after)).toBe(5)
   })
 
   test('leaves out a process missing from the previous reading that started before it', () => {
     const before = reading(BEFORE_MS, [process(10, 1, 0)])
     const after = reading(AFTER_MS, [process(10, 1, 0), process(11, 10, 9000, BEFORE_MS - 1)])
-    expect(treeCpu(before, after, 10)).toBe(0)
+    expect(cpuBetween(before, after)).toBe(0)
   })
 
   test('leaves out a process older than the parent it names, whose pid was reused', () => {
     const before = reading(BEFORE_MS, [process(10, 1, 0), process(11, 10, 0, ROOT_STARTED_MS - 1)])
     const after = reading(AFTER_MS, [process(10, 1, 0), process(11, 10, 9000, ROOT_STARTED_MS - 1)])
-    expect(treeCpu(before, after, 10)).toBe(0)
+    expect(cpuBetween(before, after)).toBe(0)
   })
 
   test('visits each process once whatever the parent links say', () => {
     const before = reading(BEFORE_MS, [process(10, 11, 0), process(11, 10, 0)])
     const after = reading(AFTER_MS, [process(10, 11, 2000), process(11, 10, 2000)])
-    expect(treeCpu(before, after, 10)).toBe(10)
-  })
-
-  test('gives 0 when the root has gone', () => {
-    expect(treeCpu(reading(BEFORE_MS, [process(10, 1, 0)]), reading(AFTER_MS, []), 10)).toBe(0)
+    expect(cpuBetween(before, after)).toBe(10)
   })
 
   test('caps the share at 100%', () => {
     const before = reading(BEFORE_MS, [process(10, 1, 0)])
     const after = reading(AFTER_MS, [process(10, 1, 41_000)])
-    expect(treeCpu(before, after, 10)).toBe(100)
+    expect(cpuBetween(before, after)).toBe(100)
   })
 })
 
-describe('processState', () => {
+describe("the state of a job's process", () => {
   const before = reading(BEFORE_MS, [process(10, 1, 0)])
 
   test('is busy from 5% of all cores', () => {
-    expect(processState('10', STARTED_SEC, before, reading(AFTER_MS, [process(10, 1, 2000)]))).toEqual({
+    expect(stateBetween(before, reading(AFTER_MS, [process(10, 1, 2000)]))).toEqual({
       kind: 'busy',
       cpuPercent: 5,
     })
   })
 
   test('is idle below 5%', () => {
-    expect(processState('10', STARTED_SEC, before, reading(AFTER_MS, [process(10, 1, 1999)]))).toEqual({
+    expect(stateBetween(before, reading(AFTER_MS, [process(10, 1, 1999)]))).toEqual({
       kind: 'idle',
       cpuPercent: 4.9975,
     })
   })
 
   test('has ended when its pid is gone', () => {
-    expect(processState('10', STARTED_SEC, before, reading(AFTER_MS, [process(11, 1, 9000)]))).toEqual({ kind: 'ended' })
+    expect(stateBetween(before, reading(AFTER_MS, [process(11, 1, 9000)]))).toEqual({ kind: 'ended' })
   })
 
   test('has ended when its pid names a process started after the job', () => {
     const reused = reading(AFTER_MS, [process(10, 1, 9000, (STARTED_SEC + 1) * 1000)])
-    expect(processState('10', STARTED_SEC, before, reused)).toEqual({ kind: 'ended' })
+    expect(stateBetween(before, reused)).toEqual({ kind: 'ended' })
   })
 
   test("is running when its process started within the job's first second", () => {
     // The helper writes its start time cut to the whole second.
     const same = reading(AFTER_MS, [process(10, 1, 0, (STARTED_SEC + 1) * 1000 - 1)])
-    expect(processState('10', STARTED_SEC, before, same).kind).toBe('idle')
+    expect(stateBetween(before, same)?.kind).toBe('idle')
   })
 })
 
 describe('processStates', () => {
-  const job = (file: string, kind: 'running' | 'finished'): Job => ({
-    file,
-    script: 'build.sh',
-    pid: file.replace(/\D/g, ''),
-    mtimeMs: BEFORE_MS,
-    line:
-      kind === 'running'
-        ? { kind: 'running', startedSec: STARTED_SEC, step: 1, total: 4, label: '' }
-        : { kind: 'finished', startedSec: STARTED_SEC, exitCode: 0, endedSec: STARTED_SEC + 9 },
-    lastLabel: '',
-  })
   const jobs = [job('build.sh-10.txt', 'running'), job('sync.sh-11.txt', 'finished')]
   const before = reading(BEFORE_MS, [process(10, 1, 0), process(11, 1, 0)])
   const after = reading(AFTER_MS, [process(10, 1, 2000), process(11, 1, 0)])

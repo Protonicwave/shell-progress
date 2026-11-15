@@ -172,7 +172,7 @@ export function processStates(
   if (intervalMs <= 0 || intervalMs > MAX_SAMPLE_AGE_MS) return states
   for (const job of jobs) {
     if (job.line?.kind !== 'running') continue
-    states.set(job.file, processState(job.pid, job.line.startedSec, previous, current))
+    states.set(job.file, stateOfProcess(job.pid, job.line.startedSec, previous, current))
   }
   return states
 }
@@ -182,7 +182,7 @@ export function processStates(
  * ended when the pid is gone or names a process started after the job, else
  * busy or idle by its tree's CPU. `current` must be read after `previous`.
  */
-export function processState(
+function stateOfProcess(
   pid: string,
   startedSec: number,
   previous: MachineSample,
@@ -203,7 +203,7 @@ export function processState(
  * that ended between the readings is left out. `current` must be read after
  * `previous`.
  */
-export function treeCpu(previous: MachineSample, current: MachineSample, rootPid: number): number {
+function treeCpu(previous: MachineSample, current: MachineSample, rootPid: number): number {
   const before = new Map(previous.processes.map(process => [process.pid, process]))
   let cpuMs = 0
   for (const process of processTree(current.processes, rootPid)) {

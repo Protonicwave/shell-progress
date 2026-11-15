@@ -9,7 +9,6 @@ import {
   agentCostText,
   costText,
   endTurnContext,
-  limitForecast,
   shortDurationText,
   endTurnCalls,
   mergeAgents,
@@ -279,55 +278,62 @@ const reading = (minutesBeforeReset: number, percentUsed: number, resetsMs = RES
   resetsMs,
 })
 
-describe('limitForecast', () => {
+describe('the five-hour forecast', () => {
   // 10 points in 20 minutes: the 40 left take 80 minutes from the newest reading.
   const rising = [reading(120, 50), reading(100, 60)]
   const newestMs = RESETS_MS - 100 * MINUTE_MS
+  const fullBy80 = `full by ${localClock(newestMs + 80 * MINUTE_MS)}`
+  const resets = `resets ${resetsClock}`
+  /** The five-hour row's figures after the percentage, at `nowMs`, with the limit at the newest reading. */
+  const laterFigures = (readings: readonly LimitReading[], nowMs = newestMs) => {
+    const percentUsed = readings.at(-1)?.percentUsed ?? 60
+    const limit = { kind: 'five_hour', percentUsed, resetsAt: new Date(RESETS_MS).toISOString() } as const
+    const figures = usageRows(usage({ rateLimits: [limit] }), null, readings, nowMs)[0]?.figures
+    return figures?.slice(figures.indexOf(' · ') + ' · '.length)
+  }
 
   test('projects the rate between two readings to when the limit fills', () => {
-    expect(limitForecast(rising, newestMs, RESETS_MS)).toBe(newestMs + 80 * MINUTE_MS)
+    expect(laterFigures(rising)).toBe(fullBy80)
   })
 
   test('takes the rate from the newest reading at least 5 minutes before the newest', () => {
     const readings = [reading(160, 10), reading(120, 50), reading(103, 59), reading(100, 60)]
-    expect(limitForecast(readings, newestMs, RESETS_MS)).toBe(newestMs + 80 * MINUTE_MS)
+    expect(laterFigures(readings)).toBe(fullBy80)
   })
 
   test('gives none for readings under 5 minutes apart', () => {
-    expect(limitForecast([reading(104, 50), reading(100, 60)], newestMs, RESETS_MS)).toBeNull()
+    expect(laterFigures([reading(104, 50), reading(100, 60)])).toBe(resets)
   })
 
   test('gives none for a single reading or none', () => {
-    expect(limitForecast([reading(100, 60)], newestMs, RESETS_MS)).toBeNull()
-    expect(limitForecast([], newestMs, RESETS_MS)).toBeNull()
+    expect(laterFigures([reading(100, 60)])).toBe(resets)
+    expect(laterFigures([])).toBe(resets)
   })
 
   test('gives none for a percentage that held or fell', () => {
-    expect(limitForecast([reading(120, 60), reading(100, 60)], newestMs, RESETS_MS)).toBeNull()
-    expect(limitForecast([reading(120, 70), reading(100, 60)], newestMs, RESETS_MS)).toBeNull()
+    expect(laterFigures([reading(120, 60), reading(100, 60)])).toBe(resets)
+    expect(laterFigures([reading(120, 70), reading(100, 60)])).toBe(resets)
   })
 
   test('gives none when the limit resets before it would fill', () => {
-    const late = [reading(60, 50), reading(40, 60)]
-    expect(limitForecast(late, RESETS_MS - 40 * MINUTE_MS, RESETS_MS)).toBeNull()
+    expect(laterFigures([reading(60, 50), reading(40, 60)], RESETS_MS - 40 * MINUTE_MS)).toBe(resets)
   })
 
   test('gives none once the reset has passed', () => {
-    expect(limitForecast(rising, RESETS_MS, RESETS_MS)).toBeNull()
+    expect(laterFigures(rising, RESETS_MS)).toBe(resets)
   })
 
   test('gives none for a fill time already past', () => {
-    expect(limitForecast(rising, newestMs + 81 * MINUTE_MS, RESETS_MS)).toBeNull()
+    expect(laterFigures(rising, newestMs + 81 * MINUTE_MS)).toBe(resets)
   })
 
   test('gives none for a limit already full', () => {
-    expect(limitForecast([reading(120, 90), reading(100, 100)], newestMs, RESETS_MS)).toBeNull()
+    expect(laterFigures([reading(120, 90), reading(100, 100)])).toBe(resets)
   })
 
   test('leaves out readings from an earlier window', () => {
     const earlierResetMs = RESETS_MS - 300 * MINUTE_MS
-    const readings = [reading(120, 5, earlierResetMs), reading(100, 60)]
-    expect(limitForecast(readings, newestMs, RESETS_MS)).toBeNull()
+    expect(laterFigures([reading(120, 5, earlierResetMs), reading(100, 60)])).toBe(resets)
   })
 })
 

@@ -242,7 +242,7 @@ export function recordLimitReading(
  * percentage did not rise, the limit is full, or the fill time is not
  * between now and the reset. Readings from another window are left out.
  */
-export function limitForecast(
+function limitForecast(
   readings: readonly LimitReading[],
   nowMs: number,
   resetsMs: number,
