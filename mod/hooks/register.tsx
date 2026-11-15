@@ -251,7 +251,11 @@ function followSession(on: On): void {
     const result = await next(e)
     if (result.deny !== undefined || result.isError === true) return result
     const cost = agentCostOf(result.result)
-    if (cost !== undefined) await update($, agentCosts, costs => recordAgentCost(costs, cost))
+    if (cost === undefined) return result
+    // A cost that cannot be stored costs only its row, so the result still goes on.
+    await update($, agentCosts, costs => recordAgentCost(costs, cost)).catch((error: unknown) => {
+      $.ui.log(`shell-progress: cannot record an agent's cost: ${errorMessage(error)}`)
+    })
     return result
   })
 }

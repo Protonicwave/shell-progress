@@ -521,3 +521,17 @@ test('a failing agent list is logged once and the last list stays drawn', async 
   expect(await ui.find({ type: 'Button', text: 'review migrations' })).toBeDefined()
   await ui.unmount()
 })
+
+test("an agent's result passes through when its cost cannot be stored", async ($, on) => {
+  const { world } = fakeWorld(on, new Map())
+  on('tool.call', { tool: 'Agent' }, () => ({ result: completedAgentRecord('a1', 40_000, 65_200) }))
+  on('state.set', (_, e, next) => {
+    if (e.key === 'agentCosts') return { deny: 'the state is read-only' }
+    return next(e)
+  })
+  await startSession($)
+
+  const call = { tool: 'Agent', prompt: 'look', subagent_type: 'Explore', description: 'review' } as const
+  expect(await $.tool.call(call)).toMatchObject({ result: { agentId: 'a1', totalTokens: 65_200 } })
+  expect(world.logs).toContain("shell-progress: cannot record an agent's cost: shell-progress: $.state.set: the state is read-only")
+})
