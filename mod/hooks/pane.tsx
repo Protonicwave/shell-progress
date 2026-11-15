@@ -1,6 +1,19 @@
 import type { Color, Elements, RenderNode, SessionUsage } from 'claude-code'
 
-import type { EndedCall, Job, ListedAgent, RunningCall, SessionTurn, ToolCalls } from '../types'
+import type {
+  AgentCost,
+  EndedCall,
+  Job,
+  LimitReading,
+  ListedAgent,
+  MachineSample,
+  ProcessState,
+  RunningCall,
+  SessionTurn,
+  ToolCalls,
+  TurnContext,
+} from '../types'
+import { isCurrentSample, machineText, machineWarnings } from './machine'
 import { POLL_INTERVAL_MS } from './poll'
 import type { FinishedJob, RunningLine, UnfinishedJob } from './progress'
 import {
@@ -9,23 +22,37 @@ import {
   clockTimeText,
   durationText,
   finishedText,
+  hasRunningJob,
   isFinished,
-  isStalled,
   remainingSeconds,
   remainingText,
   runKey,
   shownJobs,
+  stallState,
 } from './progress'
-import { costText, shortDurationText, usageBars } from './session'
+import type { UsageRow } from './session'
+import { agentCostText, costText, shortDurationText, usageRows } from './session'
 
 export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'This session'
+// The width the pane asks for when docked: room for a usage bar of 14 cells
+// beside its label and the widest figures it usually has.
+export const PANE_COLUMNS = 48
 
 const MAX_BAR_CELLS = 40
 // Agents beyond this many, the oldest, are counted rather than drawn.
 const MAX_SHOWN_AGENTS = 5
 // A usage bar this full is drawn in HIGH_USAGE_COLOUR.
 const HIGH_USAGE_FRACTION = 0.8
+// From this many body columns each usage bar shares a row with its label and
+// figures; below it the figures would leave the bar too few cells.
+const ONE_ROW_USAGE_MIN_COLUMNS = 40
+// From this many body columns a running job's row gives its CPU; below it
+// the figure would crowd out the job's name.
+const JOB_CPU_MIN_COLUMNS = 40
+// Wide enough for the longest labels, `5h limit` and `machine`.
+const USAGE_LABEL_COLUMNS = 8
+const USAGE_GAP_COLUMNS = 1
 // Columns kept clear to the right of the bar.
 const BAR_GAP_COLUMNS = 2
 const SPINNER_FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
@@ -38,6 +65,8 @@ const STALLED_COLOUR: Color = 'warning'
 const DONE_COLOUR: Color = 'success'
 const FAILED_COLOUR: Color = 'error'
 const HIGH_USAGE_COLOUR: Color = 'warning'
+const WARNING_FIGURES_COLOUR: Color = 'warning'
+const MACHINE_WARNING_COLOUR: Color = 'warning'
 
 /** The elements the pane draws with, which every surface's table holds. */
 type PaneElements = Pick<Elements['terminal'], 'Box' | 'Button' | 'Text'>
@@ -69,8 +98,17 @@ type PaneView = {
   readonly actions: PaneActions
   readonly toolCalls: ToolCalls
   readonly turn: SessionTurn
+  readonly turnContext: TurnContext
+  /** Oldest first. */
+  readonly limitReadings: readonly LimitReading[]
   /** Oldest first. */
   readonly agents: readonly ListedAgent[]
+  /** What each finished agent took, oldest first. */
+  readonly agentCosts: readonly AgentCost[]
+  /** The sampler's last reading, or `null` before its first. */
+  readonly machineSample: MachineSample | null
+  /** What each running job's processes are doing, by job file; a job without a state shows no CPU. */
+  readonly processStates: ReadonlyMap<string, ProcessState>
 }
 
 /**
@@ -131,6 +169,7 @@ function agentsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   const shown = view.agents.slice(-MAX_SHOWN_AGENTS).reverse()
   const moreCount = view.agents.length - shown.length
   const more = moreCount > 0 ? <Text dimColor>{moreCount} more</Text> : undefined
+  const costs = new Map(view.agentCosts.map(cost => [cost.id, cost]))
   return (
     <Box flexDirection="column" marginTop={1}>
       {spreadRow(ui, <Text dimColor>Agents</Text>, more)}
@@ -150,7 +189,13 @@ function agentsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
           ) : (
             <Text color={colour}>{agent.status}</Text>
           )
-        return <Box key={agent.id}>{nameRow(ui, button, status)}</Box>
+        const cost = costs.get(agent.id)
+        return (
+          <Box key={agent.id} flexDirection="column">
+            {nameRow(ui, button, status)}
+            {cost !== undefined && <Text dimColor>{agentCostText(cost)}</Text>}
+          </Box>
+        )
       })}
     </Box>
   )
@@ -200,27 +245,107 @@ function recentGroup(ui: PaneElements, calls: readonly EndedCall[]): RenderNode 
   )
 }
 
-/** The context and five-hour bars, each with its figures, and the session's cost. */
+/**
+ * The machine's readings while a job is still to finish, then the context and
+ * five-hour bars, each on one row with its label and figures where the pane
+ * is wide enough and under them where it is not, then the session's cost.
+ */
 function usageGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   const { Box, Text } = ui
-  const bars = usageBars(view.usage)
+  const isOneRow = view.bodyColumns >= ONE_ROW_USAGE_MIN_COLUMNS
+  const machine = machineRows(ui, view, isOneRow)
+  const rows = usageRows(view.usage, view.turnContext.lastAddedTokens, view.limitReadings, view.nowMs)
   const cost = costText(view.usage)
-  if (bars.length === 0 && cost === undefined) return undefined
-  const cells = barCellsFor(view.bodyColumns)
+  if (machine === undefined && rows.length === 0 && cost === undefined) return undefined
+  const drawRow = isOneRow
+    ? oneUsageRow(ui, oneRowBarCells(view.bodyColumns, rows))
+    : (row: UsageRow) => twoUsageRows(ui, barCellsFor(view.bodyColumns), row)
   return (
     <Box flexDirection="column" marginTop={1}>
-      {bars.map(bar => {
-        const colour = bar.fraction >= HIGH_USAGE_FRACTION ? HIGH_USAGE_COLOUR : BAR_COLOUR
-        return (
-          <Box key={bar.label} flexDirection="column">
-            {spreadRow(ui, <Text dimColor>{bar.label}</Text>, <Text dimColor>{bar.figures}</Text>)}
-            {barRow(ui, bar.fraction, cells, colour)}
-          </Box>
-        )
-      })}
+      {machine}
+      {rows.map(drawRow)}
       {cost !== undefined && <Text dimColor>{cost}</Text>}
     </Box>
   )
+}
+
+/**
+ * The `machine` label and readings, lined up with the usage rows, and any
+ * warnings on a row of their own so a narrow pane cuts the readings rather
+ * than a warning. Nothing once no job is running or the reading is old.
+ */
+function machineRows(ui: PaneElements, view: PaneView, isOneRow: boolean): RenderNode | undefined {
+  const { Box, Text } = ui
+  const sample = view.machineSample
+  if (sample === null || !isCurrentSample(sample, view.nowMs)) return undefined
+  if (!hasRunningJob(view.jobs, view.dismissedJobs)) return undefined
+  const label = <Text dimColor>machine</Text>
+  const readings = <Text dimColor wrap="truncate-end">{machineText(sample)}</Text>
+  const warnings = machineWarnings(sample)
+  const indent = isOneRow ? USAGE_LABEL_COLUMNS + USAGE_GAP_COLUMNS : 0
+  return (
+    <Box flexDirection="column">
+      {isOneRow ? (
+        <Box gap={USAGE_GAP_COLUMNS}>
+          <Box width={USAGE_LABEL_COLUMNS} flexShrink={0}>{label}</Box>
+          {readings}
+        </Box>
+      ) : (
+        <Box flexDirection="column">
+          {label}
+          {readings}
+        </Box>
+      )}
+      {warnings.length > 0 && (
+        <Box marginLeft={indent}>
+          <Text color={MACHINE_WARNING_COLOUR}>{warnings.join(' · ')}</Text>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+/** Draws a usage row as label, bar and figures, every row's bar `cells` wide so the bars line up. */
+function oneUsageRow(ui: PaneElements, cells: number) {
+  const { Box, Text } = ui
+  return (row: UsageRow) => (
+    <Box key={row.label} gap={USAGE_GAP_COLUMNS}>
+      <Box width={USAGE_LABEL_COLUMNS} flexShrink={0}>
+        <Text dimColor>{row.label}</Text>
+      </Box>
+      {barRow(ui, row.fraction, cells, usageColour(row))}
+      {usageFigures(ui, row)}
+    </Box>
+  )
+}
+
+function twoUsageRows(ui: PaneElements, cells: number, row: UsageRow) {
+  const { Box, Text } = ui
+  return (
+    <Box key={row.label} flexDirection="column">
+      {spreadRow(ui, <Text dimColor>{row.label}</Text>, usageFigures(ui, row))}
+      {barRow(ui, row.fraction, cells, usageColour(row))}
+    </Box>
+  )
+}
+
+/** What is left for the bars once the labels, the widest figures and the gaps between them have their room. */
+function oneRowBarCells(bodyColumns: number, rows: readonly UsageRow[]): number {
+  const figuresColumns = Math.max(...rows.map(row => row.figures.length))
+  const free = bodyColumns - USAGE_LABEL_COLUMNS - figuresColumns - 2 * USAGE_GAP_COLUMNS
+  return Math.max(1, Math.min(MAX_BAR_CELLS, free))
+}
+
+function usageFigures({ Text }: PaneElements, row: UsageRow) {
+  return row.isWarning ? (
+    <Text color={WARNING_FIGURES_COLOUR}>{row.figures}</Text>
+  ) : (
+    <Text dimColor>{row.figures}</Text>
+  )
+}
+
+function usageColour(row: UsageRow): Color {
+  return row.fraction >= HIGH_USAGE_FRACTION ? HIGH_USAGE_COLOUR : BAR_COLOUR
 }
 
 /** The jobs: unfinished first, then the finished ones under their own label. */
@@ -233,7 +358,7 @@ function jobsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   )
   if (unfinished.length === 0 && finished.length === 0 && hiddenCount === 0) return undefined
   const runningCount = unfinished.filter(
-    job => job.line !== null && !isStalled(job, view.nowMs, view.stallMs),
+    job => job.line !== null && jobStall(view, job) !== 'stalled',
   ).length
   const count = countText(runningCount, unfinished.length, finished.length)
 
@@ -244,7 +369,7 @@ function jobsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
         <Box key={job.file} flexDirection="column" marginTop={1}>
           {unfinishedRows(ui, view, job)}
           {job.file === view.expandedJob &&
-            jobDetails(ui, view, job, isStalled(job, view.nowMs, view.stallMs))}
+            jobDetails(ui, view, job, jobStall(view, job) === 'stalled')}
         </Box>
       ))}
       {finished.length > 0 && (
@@ -303,29 +428,23 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
   }
 
   const line = job.line
-  const hasStalled = isStalled(job, view.nowMs, view.stallMs)
-  // A stalled row gives how long the job ran before its file went quiet, which
-  // stays put, so the pane need not be redrawn for it.
-  const time = hasStalled ? (
-    <Text color={STALLED_COLOUR}>
-      stalled after {durationText(job.mtimeMs / MS_PER_SECOND - line.startedSec)}
-    </Text>
-  ) : (
-    <Text dimColor>{runningTimeText(line, view.nowMs)}</Text>
-  )
+  const stall = jobStall(view, job)
+  const hasStalled = stall === 'stalled'
+  const time = jobTime(ui, view, job, line, stall)
 
+  const processPart = processText(view, job, hasStalled)
   if (line.total === 0) {
     const glyph = hasStalled
       ? <Text dimColor>·</Text>
       : <Text color={BAR_COLOUR}>{spinnerFrame(view.nowMs)}</Text>
     return [
-      nameRow(ui, name, <Text dimColor>no step count</Text>),
+      nameRow(ui, name, <Text dimColor>{processPart}no step count</Text>),
       spreadRow(ui, <Text>{glyph} {line.label}</Text>, time),
     ]
   }
 
   return [
-    nameRow(ui, name, <Text>{stepText(line)}</Text>),
+    nameRow(ui, name, <Text>{processPart}{stepText(line)}</Text>),
     barRow(
       ui,
       line.step / line.total,
@@ -334,6 +453,49 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
     ),
     spreadRow(ui, <Text dimColor>{line.label}</Text>, time),
   ]
+}
+
+/**
+ * `cpu 12% · ` while the job's processes are known, unless the pane is too
+ * narrow; `process ended · ` once a stalled job's process has gone, whatever
+ * the width, since that is why it stalled. Otherwise nothing.
+ */
+function processText(view: PaneView, job: Job, hasStalled: boolean): string {
+  const state = view.processStates.get(job.file)
+  if (state === undefined) return ''
+  if (state.kind === 'ended') return hasStalled ? 'process ended · ' : ''
+  if (view.bodyColumns < JOB_CPU_MIN_COLUMNS) return ''
+  return `cpu ${Math.round(state.cpuPercent)}% · `
+}
+
+/**
+ * The end of a running job's last row. A stalled job gives how long it ran
+ * before its file went quiet, which stays put, so the pane need not be
+ * redrawn for it; a quiet job whose processes are busy, how long its file has
+ * been quiet; any other job, its running time.
+ */
+function jobTime(
+  { Text }: PaneElements,
+  view: PaneView,
+  job: Job,
+  line: RunningLine,
+  stall: ReturnType<typeof stallState>,
+) {
+  if (stall === 'stalled') {
+    return (
+      <Text color={STALLED_COLOUR}>
+        stalled after {durationText(job.mtimeMs / MS_PER_SECOND - line.startedSec)}
+      </Text>
+    )
+  }
+  if (stall === 'quiet') {
+    return <Text>quiet {durationText((view.nowMs - job.mtimeMs) / MS_PER_SECOND)} · busy</Text>
+  }
+  return <Text dimColor>{runningTimeText(line, view.nowMs)}</Text>
+}
+
+function jobStall(view: PaneView, job: Job) {
+  return stallState(job, view.nowMs, view.stallMs, view.processStates)
 }
 
 /** `1m 12s`, and from the third step `1m 12s · about 25s left`. */

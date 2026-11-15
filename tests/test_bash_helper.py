@@ -10,7 +10,23 @@ import unittest
 from pathlib import Path
 
 HELPER = Path(__file__).resolve().parent.parent / "helpers" / "progress.sh"
-BASH = shutil.which("bash")
+
+
+def bash_path() -> str | None:
+    """The bash on PATH, or the one that Git's bin/bash.exe launcher starts.
+
+    The launcher runs usr/bin/bash.exe as its child, so a script started
+    through it runs under a pid other than the one Popen reports.
+    """
+    found = shutil.which("bash")
+    if found is None:
+        return None
+    launched = Path(found).parent.parent / "usr" / "bin" / "bash.exe"
+    is_git_launcher = Path(found).parent.name.lower() == "bin" and launched.is_file()
+    return str(launched) if is_git_launcher else found
+
+
+BASH = bash_path()
 SUBPROCESS_TIMEOUT_SECONDS = 60
 SECONDS_PER_HOUR = 3600
 CLEANUP_MAX_FILES = 500
@@ -114,6 +130,17 @@ class BashHelperTests(unittest.TestCase):
         self.run_job("progress 1 2 x", keep_running=True)
         self.assertRegex(self.only_progress_file().name, FILE_NAME)
 
+    def test_file_name_carries_the_pid_of_the_process_that_ran_the_script(self) -> None:
+        # Under Git Bash and Cygwin this is the Windows pid, which differs from $$.
+        self.write_script("progress 1 2 x", keep_running=True)
+        process = self.start(self.environment())
+        _, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT_SECONDS)
+        self.assertEqual(process.returncode, 0, stderr)
+        match = FILE_NAME.match(self.only_progress_file().name)
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertEqual(int(match.group(1)), process.pid)
+
     def test_total_zero_is_written_as_is(self) -> None:
         self.run_job("progress 3 0 working", keep_running=True)
         _, step, total, label = self.running_fields(self.read_line(self.only_progress_file()))
@@ -146,12 +173,12 @@ class BashHelperTests(unittest.TestCase):
 
     def test_repeated_calls_keep_the_same_start_time(self) -> None:
         body = (
-            'file="$CLAUDE_PROGRESS_DIR/job.sh-$$.txt"\n'
             "progress 1 3 first\n"
-            'echo "seen:$(<"$file")"\n'
+            'file=("$CLAUDE_PROGRESS_DIR"/job.sh-*.txt)\n'
+            'echo "seen:$(<"${file[0]}")"\n'
             "sleep 1.2\n"
             "progress 2 3 second\n"
-            'echo "seen:$(<"$file")"'
+            'echo "seen:$(<"${file[0]}")"'
         )
         result = self.run_job(body, keep_running=True)
         seen = [line[len("seen:") :] for line in result.stdout.splitlines() if line.startswith("seen:")]

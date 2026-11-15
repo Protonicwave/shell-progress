@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Session and jobs pane</title>
-<meta name="description" content="Mockup of a proposed session pane and seven job features for a Claude Code mod that draws live progress bars for background scripts beside the chat.">
+<meta name="description" content="Mockup of the session pane for a Claude Code mod that draws live progress bars for background scripts beside the chat, with proposed changes to its width, usage bars, footer and machine readings.">
 <style>
 :root {
   /* Page chrome: neutral tinted toward the terminal's cool blue-grey */
@@ -126,7 +126,9 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .tab { background: var(--term); color: var(--term-ink); padding: 7px var(--s3); border-radius: 6px 6px 0 0; align-self: end; }
 .cols { margin-left: auto; font-family: var(--mono); color: var(--term-dim); }
 
-.screen { display: grid; grid-template-columns: minmax(0, 1fr) 46ch; height: 38rem; }
+/* The window keeps one height, so rows the footer frees go to the pane. --pane-cols is the pane's body width in terminal columns. */
+.term { --pane-cols: 48; --pane-width: calc(var(--pane-cols) * 1ch + 2 * var(--s4) + 1px); display: flex; flex-direction: column; height: 46rem; }
+.screen { display: grid; grid-template-columns: minmax(0, 1fr) var(--pane-width); flex: 1; min-height: 0; }
 .term[data-cols="100"] .screen { grid-template-columns: minmax(0, 1fr); }
 .term[data-cols="100"] .toasts { right: var(--s3); }
 .term[data-cols="100"] .pane { display: none; }
@@ -145,8 +147,12 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .line.note .bad { color: var(--failed); }
 .line.enter { animation: fade-tint 1.6s var(--ease); }
 
-.pane { border-left: 1px solid var(--term-line); padding: var(--s4) var(--s4) var(--s3); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.pane { position: relative; container-type: inline-size; border-left: 1px solid var(--term-line); padding: var(--s4) var(--s4) var(--s3); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .pane :focus-visible { outline-offset: -2px; }
+.grip { position: absolute; top: 0; bottom: 0; left: -8px; width: 16px; z-index: 1; cursor: col-resize; touch-action: none; }
+.grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 7px; width: 2px; background: var(--accent); opacity: 0; transition: opacity 0.15s var(--ease); }
+.grip:hover::after, .grip.dragging::after, .grip:focus-visible::after { opacity: 1; }
+.probe { position: absolute; visibility: hidden; white-space: pre; }
 .pane-head { display: flex; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s3); flex: none; }
 .pane-title { font-weight: 700; }
 .pane-count { color: var(--term-dim); text-align: right; }
@@ -166,14 +172,27 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .rrow .r-tool { color: var(--term-ink); }
 .rrow .bad { color: var(--failed); }
 .foot { flex: none; margin: var(--s3) 0 0; padding-top: var(--s2); border-top: 1px solid var(--term-line); }
-.gauge { margin-bottom: var(--s2); }
-.cost { margin: 0; color: var(--term-dim); }
-.meter { position: relative; display: block; width: 24ch; height: 1.35em; line-height: 1.35; white-space: pre; overflow: hidden; }
+/* Each gauge is one row: label, bar, figures. Below 40 columns the bar drops to a row of its own. */
+.gauge { display: grid; grid-template-columns: 8ch minmax(0, 1fr) auto; column-gap: 1ch; align-items: center; margin-bottom: var(--s1); }
+.g-label { color: var(--term-dim); white-space: nowrap; }
+.g-figures { white-space: pre; }
+.g-figures.warn, .mach .warn { color: var(--stalled); }
+.mach { grid-column: 2 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--term-dim); }
+.mach .warn { display: block; white-space: normal; }
+.gauge.machine { align-items: start; }
+@container (max-width: 39.9ch) {
+  .gauge { grid-template-columns: minmax(0, 1fr) auto; }
+  .gauge .meter, .mach { grid-column: 1 / -1; grid-row: 2; }
+  .r-cpu { display: none; }
+}
+.cost { margin: var(--s1) 0 0; color: var(--term-dim); }
+.meter { position: relative; display: block; min-width: 0; height: 1.35em; line-height: 1.35; white-space: pre; overflow: hidden; }
 .m-empty { color: var(--term-faint); }
-.m-fill { position: absolute; left: 0; top: 0; clip-path: inset(0 100% 0 0); color: var(--accent); transition: clip-path 0.25s var(--ease); }
+.m-fill { position: absolute; inset: 0; overflow: hidden; clip-path: inset(0 100% 0 0); color: var(--accent); transition: clip-path 0.25s var(--ease); }
 .meter.hot .m-fill { color: var(--stalled); }
 
 .job, .agent { position: relative; margin-bottom: var(--s2); border-radius: 6px; }
+.job .t3.quiet { color: var(--term-ink); }
 .row { display: flex; justify-content: space-between; gap: var(--s2); min-width: 0; }
 .row > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .row > :last-child { flex: none; white-space: pre; }
@@ -192,7 +211,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .agent.done .row-btn { color: var(--term-dim); }
 .agent.done .name { font-weight: 400; }
 .agent .ok { color: var(--done); }
-.job.enter, .agent.enter, .rrow.enter { animation: fade-tint 1.6s var(--ease); }
+.job.enter, .agent.enter, .rrow.enter, .foot.enter, .footer.enter { animation: fade-tint 1.6s var(--ease); }
 @keyframes fade-tint { from { background: oklch(0.8 0.14 72 / 0.14); } to { background: transparent; } }
 
 .row-btn {
@@ -231,18 +250,29 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 .confirm { margin-top: var(--s1); }
 .confirm .cq { color: var(--term-ink); }
 
-.prompt { margin: 0 var(--s4); border: 1px solid var(--term-line); border-radius: 6px; padding: var(--s2) var(--s3); color: var(--term-dim); }
+.prompt { flex: none; margin: 0 var(--s4); border: 1px solid var(--term-line); border-radius: 6px; padding: var(--s2) var(--s3); color: var(--term-dim); }
 .prompt .caret { color: var(--term-ink); }
 .cursor { display: inline-block; width: 0.6em; background: var(--term-ink); color: transparent; }
-.status { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s5); padding: var(--s2) var(--s4) var(--s3); color: var(--term-dim); }
-.status .jobs { color: var(--term-ink); display: inline-flex; flex-wrap: wrap; white-space: pre-wrap; }
-.status .jobs b { color: var(--accent); font-weight: 400; }
-.status .jobs b.stall { color: var(--stalled); }
-.status .hint { color: var(--term-dim); }
+
+/* Everything under the prompt: the status line script, the prompt hint, the mod's line and Claude Code's agent list. One row each. */
+.footer { flex: none; padding: var(--s2) var(--s4) var(--s3); color: var(--term-dim); border-radius: 6px; }
+.footline { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.footline .ink { color: var(--term-ink); }
+.footline .mode { color: var(--failed); }
+.footline .add { color: var(--done); }
+.footline .del { color: var(--failed); }
+.footline .ctxbar b { color: var(--failed); font-weight: 400; }
+.footline .jobs { color: var(--term-ink); }
+.footline .jobs b { color: var(--accent); font-weight: 400; }
+.footline .jobs b.stall { color: var(--stalled); }
+.alist { margin-top: var(--s2); }
+.arow { display: flex; gap: 2ch; min-width: 0; }
+.arow .a-task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; color: var(--term-ink); }
+.arow .a-type, .arow .a-time { flex: none; white-space: pre; }
 
 /* Toasts sit inside the terminal window; the notification card sits outside it */
 /* Toasts float over the transcript's top right corner, clear of the pane. */
-.toasts { position: absolute; top: 44px; right: calc(46ch + var(--s3)); z-index: 2; width: min(280px, calc(100% - 24px)); display: flex; flex-direction: column; gap: var(--s2); pointer-events: none; }
+.toasts { position: absolute; top: 44px; right: calc(var(--pane-width) + var(--s3)); z-index: 2; width: min(280px, calc(100% - 24px)); display: flex; flex-direction: column; gap: var(--s2); pointer-events: none; }
 .toast {
   pointer-events: auto; display: block; width: 100%; text-align: left;
   font: inherit; color: var(--term-ink); cursor: pointer;
@@ -266,8 +296,48 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 }
 .winnote .w-head { display: block; font-size: 12px; font-weight: 600; color: var(--win-muted); margin-bottom: 2px; }
 
-/* Seven proposals */
+/* All proposals: the terminal frozen with every next proposal showing, numbered pins on it, and a key beside it */
+.board { --pin: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s5); align-items: start; }
+.frame { position: relative; }
+.marks { position: absolute; inset: 0; pointer-events: none; }
+.key { display: none; }
+.wrap[data-view="all"] .board { grid-template-columns: minmax(0, 1fr) 15rem; }
+.wrap[data-view="all"] .key { display: block; }
+.wrap[data-view="all"] .live-ctl, .wrap:not([data-view="all"]) .marks { display: none; }
+/* The frame grows to fit the pane; the transcript adds no height of its own and scrolls inside the row. */
+.wrap[data-view="all"] .term { height: auto; }
+.wrap[data-view="all"] .transcript { contain: size; }
+.wrap[data-view="all"] .pane-list { overflow: visible; }
+.wrap[data-view="all"] .recent-part { display: none; }
+.wrap[data-view="all"] .grip { pointer-events: none; }
+.pin {
+  position: absolute; width: var(--pin); height: var(--pin); margin: calc(var(--pin) / -2) 0 0 calc(var(--pin) / -2);
+  border-radius: 50%; background: var(--accent); color: var(--term);
+  font: 650 12px/var(--pin) var(--sans); text-align: center; font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px var(--term);
+  transition: transform 0.15s var(--ease);
+}
+.pin.lit { transform: scale(1.2); }
+.lit-target { outline: 1px dashed var(--accent); outline-offset: 2px; border-radius: 4px; }
+.key h2 { margin: 0 0 var(--s2); font-size: 1rem; line-height: 1.3; font-weight: 650; }
+.key ol { margin: 0; padding: 0; list-style: none; }
+.key a {
+  display: grid; grid-template-columns: var(--pin) minmax(0, 1fr); gap: 0 var(--s3);
+  padding: var(--s2); margin: 0 calc(var(--s2) * -1); border-radius: var(--r-control);
+  color: inherit; text-decoration: none;
+}
+.key a:hover, .key a:focus-visible { background: var(--control); }
+.key .pin { position: static; margin: 2px 0 0; box-shadow: none; grid-row: span 2; }
+.key b { font-weight: 600; font-size: 15px; line-height: 1.35; }
+.key .gist { color: var(--page-muted); font-size: 14px; line-height: 1.4; text-wrap: pretty; }
+.key .off { margin: var(--s3) 0 0; padding-top: var(--s3); border-top: 1px solid var(--page-line); color: var(--page-muted); font-size: 14px; text-wrap: pretty; }
+@media (max-width: 1100px) {
+  .wrap[data-view="all"] .board { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Proposals: the built list, then the next one */
 .proposals { margin-top: var(--s6); }
+.proposals h2.next { margin-top: var(--s6); }
 .proposals h2 { margin: 0 0 var(--s3); font-size: 1.25rem; line-height: 1.2; letter-spacing: -0.01em; font-weight: 650; }
 .plist { margin: 0; padding: 0 0 0 var(--s5); }
 .plist li { padding: var(--s3) 0 var(--s3) var(--s2); border-top: 1px solid var(--page-line); }
@@ -286,7 +356,10 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 @media (max-width: 760px) {
   :root { --term-size: 12px; }
   .wrap { padding-top: var(--s5); }
-  .screen { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .term { height: auto; }
+  .screen { grid-template-columns: minmax(0, 1fr); }
+  .grip { display: none; }
+  .wrap[data-view="all"] .transcript { contain: none; }
   .toasts { right: var(--s3); }
   .transcript { max-height: 16rem; }
   .pane { border-left: 0; border-top: 1px solid var(--term-line); }
@@ -294,37 +367,53 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   .cols { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .line.enter, .job.enter, .agent.enter, .rrow.enter, .toast, .winnote { animation: none; }
-  .m-fill { transition: none; }
+  .line.enter, .job.enter, .agent.enter, .rrow.enter, .foot.enter, .footer.enter, .toast, .winnote { animation: none; }
+  .m-fill, .grip::after, .pin { transition: none; }
   .btn:active, .seg button:active { transform: none; }
 }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="wrap" id="wrap" data-view="all">
   <header>
     <div>
       <h1>Session and jobs pane</h1>
-      <p class="lede">The shell-progress mod already draws a bar per job beside the chat and names the running jobs on the status line. This mockup shows a proposed session pane, which follows Claude's work in every chat, and seven features for the job rows. The mod has built all but Last lines of output and Stop. Switch the pane to Jobs only to compare it with the scope the mod had before the session pane.</p>
+      <p class="lede">The shell-progress mod draws a bar per job beside the chat and names the running jobs on the status line. Of the first proposals below, it has built all but Last lines of output and Stop. It has built the next eight too, with three differences: one Windows PowerShell process reads the machine's counters rather than <code>typeperf</code>, the prompt hint keeps its two tips, and while the pane is closed the usage figures follow the hint rather than the mod's status line. All proposals holds the terminal still with all eight on screen, each numbered to match the key; Live runs the simulation and brings back the controls.</p>
     </div>
     <div class="controls">
       <div class="ctl">
+        <span class="ctl-l" id="view-l">View</span>
+        <div class="seg" role="group" aria-labelledby="view-l">
+          <button type="button" data-view="all" aria-pressed="true">All proposals</button>
+          <button type="button" data-view="live" aria-pressed="false">Live</button>
+        </div>
+      </div>
+      <div class="ctl live-ctl">
         <span class="ctl-l" id="pane-l">Pane</span>
         <div class="seg" role="group" aria-labelledby="pane-l">
           <button type="button" data-pane="session" aria-pressed="true">This session</button>
           <button type="button" data-pane="jobs" aria-pressed="false">Jobs only</button>
         </div>
       </div>
-      <div class="seg" role="group" aria-label="Terminal width">
+      <div class="ctl live-ctl">
+        <span class="ctl-l" id="footer-l">Footer</span>
+        <div class="seg" role="group" aria-labelledby="footer-l">
+          <button type="button" data-footer="now" aria-pressed="false">As now</button>
+          <button type="button" data-footer="trimmed" aria-pressed="true">Trimmed</button>
+        </div>
+      </div>
+      <div class="seg live-ctl" role="group" aria-label="Terminal width">
         <button type="button" data-cols="160" aria-pressed="true">160 columns</button>
         <button type="button" data-cols="100" aria-pressed="false">100 columns</button>
       </div>
-      <button type="button" class="btn" id="pause" aria-pressed="false">Pause live updates</button>
-      <button type="button" class="btn" id="restart">Restart simulation</button>
+      <button type="button" class="btn live-ctl" id="pause" aria-pressed="false">Pause live updates</button>
+      <button type="button" class="btn live-ctl" id="restart">Restart simulation</button>
     </div>
   </header>
 
   <main>
+   <div class="board">
+    <div class="frame" id="frame">
     <div class="term" id="term" data-cols="160">
       <div class="titlebar" aria-hidden="true">
         <span class="tab">claude: shell-progress</span>
@@ -347,6 +436,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
         </section>
 
         <aside class="pane" aria-label="Session pane" id="pane" data-mode="session">
+          <div class="grip" id="grip" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Pane width in columns" aria-valuemin="24" aria-valuemax="72" aria-valuenow="48"></div>
           <div class="pane-head">
             <span class="pane-title" id="pane-title">This session</span>
             <span class="pane-count" id="head-right">
@@ -365,17 +455,20 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
             <div id="finished"></div>
             <div class="group sess">Agents</div>
             <div class="sess" id="agents"></div>
-            <div class="group sess">Recent</div>
-            <div class="sess" id="recent"><p class="step none" id="recent-none">Nothing finished yet.</p></div>
+            <div class="group sess recent-part">Recent</div>
+            <div class="sess recent-part" id="recent"><p class="step none" id="recent-none">Nothing finished yet.</p></div>
           </div>
-          <div class="foot sess">
+          <div class="foot sess" id="foot">
+            <div class="gauge machine" id="mach-row"><span class="g-label">machine</span><span class="mach" id="mach"></span></div>
             <div class="gauge">
-              <div class="row"><span>context</span><span id="ctx-r"></span></div>
+              <span class="g-label">context</span>
               <span class="meter" id="ctx-m" role="meter" aria-label="Context used" aria-valuemin="0" aria-valuemax="100"><span class="m-empty" aria-hidden="true"></span><span class="m-fill" aria-hidden="true"></span></span>
+              <span class="g-figures" id="ctx-r"></span>
             </div>
             <div class="gauge">
-              <div class="row"><span>5-hour limit</span><span id="lim-r"></span></div>
+              <span class="g-label">5h limit</span>
               <span class="meter" id="lim-m" role="meter" aria-label="Five-hour limit used" aria-valuemin="0" aria-valuemax="100"><span class="m-empty" aria-hidden="true"></span><span class="m-fill" aria-hidden="true"></span></span>
+              <span class="g-figures" id="lim-r"></span>
             </div>
             <p class="cost" id="cost"></p>
           </div>
@@ -384,9 +477,34 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
       </div>
 
       <div class="prompt" aria-hidden="true"><span class="caret">&gt;</span> <span class="cursor">_</span></div>
-      <div class="status" id="status" aria-label="Status line"></div>
+      <div class="footer" id="footer" role="group" aria-label="Lines under the prompt">
+        <p class="footline" id="script-top"></p>
+        <p class="footline" id="script-usage"></p>
+        <p class="footline" id="hint"></p>
+        <p class="footline" id="status"></p>
+        <div class="alist" id="alist"></div>
+      </div>
       <div class="toasts" id="toasts"></div>
+      <span class="probe" id="probe" aria-hidden="true">0000000000</span>
     </div>
+    <div class="marks" id="marks" aria-hidden="true"></div>
+    </div>
+
+    <aside class="key" id="key" aria-labelledby="key-h">
+      <h2 id="key-h">Next proposals</h2>
+      <ol>
+        <li><a href="#p-bars"><span class="pin">1</span><b></b><span class="gist">Label, bar and figures share a row.</span></a></li>
+        <li><a href="#p-width"><span class="pin">2</span><b></b><span class="gist">Opens at 48 columns; a width you drag is kept.</span></a></li>
+        <li><a href="#p-footer"><span class="pin">3</span><b></b><span class="gist">The status line keeps one row, and the hint keeps the permission mode.</span></a></li>
+        <li><a href="#p-agents"><span class="pin">4</span><b></b><span class="gist">Time and tokens once an agent finishes.</span></a></li>
+        <li><a href="#p-machine"><span class="pin">5</span><b></b><span class="gist">CPU, GPU and memory while a job runs, with a warning for a held-back CPU or battery.</span></a></li>
+        <li><a href="#p-cpu"><span class="pin">6</span><b></b><span class="gist">A quiet job that is busy is not stalled.</span></a></li>
+        <li><a href="#p-forecast"><span class="pin">7</span><b></b><span class="gist">When the five-hour limit runs out, if that is before it resets.</span></a></li>
+        <li><a href="#p-added"><span class="pin">8</span><b></b><span class="gist">What the last turn added, at the end of the context figures.</span></a></li>
+      </ol>
+      <p class="off">Two states can't share this frame: below 40 columns each bar takes two rows, and with the pane closed the mod's status line carries the usage figures. Live shows both.</p>
+    </aside>
+   </div>
     <p class="sr" aria-live="polite" id="announce"></p>
     <div class="winstack" id="winstack"></div>
 
@@ -426,6 +544,43 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
           <p>End a running job from its row, after a confirmation that names the job and its pid. Uses <code>$.process.run</code>.</p>
         </div><button type="button" class="btn" data-demo="7" aria-label="Show stop">Show</button></div></li>
       </ol>
+
+      <h2 class="next" id="next-h">Next proposals</h2>
+      <ol class="plist">
+        <li id="p-bars"><div class="item"><div>
+          <h3>Usage bars on one row</h3>
+          <p>Each bar shares a row with its label and figures, so the context and five-hour bars take two rows instead of four. The label shortens to <code>5h limit</code> to fit. Below 40 columns each bar drops back to a row of its own: drag the pane narrower to see it. Reads <code>bodyColumns</code> from the Pane props.</p>
+        </div><button type="button" class="btn" data-demo="bars" aria-label="Show usage bars on one row">Show</button></div></li>
+        <li id="p-width"><div class="item"><div>
+          <h3>Starting width</h3>
+          <p>The mod asks for 48 columns when it opens the pane, by passing <code>columns</code> to <code>$.ui.open</code>. Claude Code already lets you drag the docked pane to any width from 24 columns to 45% of the terminal, and keeps that width for later sessions; a width you dragged beats the request. Here, drag the pane's left edge, or focus it and press the arrow keys.</p>
+        </div><button type="button" class="btn" data-demo="width" aria-label="Show starting width">Show</button></div></li>
+        <li id="p-footer"><div class="item"><div>
+          <h3>One place for each figure</h3>
+          <p>Your status line script drops its second row, whose context, cost and five-hour figures the pane already shows, and moves <code>+318 -8</code> up to the first. The mod adds those figures to its own status line only while the pane is closed, which it knows from <code>isPlaced</code>. The prompt hint keeps the permission mode and loses the two tips, through the <code>PromptHint</code> render hook. The freed row goes to the pane. Compare Footer As now with Trimmed, then try 100 columns.</p>
+        </div><button type="button" class="btn" data-demo="footer" aria-label="Show one place for each figure">Show</button></div></li>
+        <li id="p-agents"><div class="item"><div>
+          <h3>What an agent cost</h3>
+          <p>A finished agent shows its time and tokens, such as <code>0m 40s · 65.2k tokens</code>, from the Agent tool's result (<code>totalDurationMs</code>, <code>totalTokens</code>). A running agent shows only its time, because <code>$.agent.list()</code> carries no token count. Claude Code's own list under the prompt shows live tokens, and no mod can hide that list.</p>
+        </div><button type="button" class="btn" data-demo="agents" aria-label="Show what an agent cost">Show</button></div></li>
+        <li id="p-machine"><div class="item"><div>
+          <h3>Machine row</h3>
+          <p>While a job runs, a row above the bars shows CPU load, GPU load and free memory, read from Windows performance counters by one <code>typeperf</code> process the mod keeps running under <code>$.process.spawn</code>. It warns when a busy CPU runs below its base speed (<code>% Processor Performance</code> under 100), which is what a temperature reading would have told you, and when the laptop is on battery.</p>
+        </div><button type="button" class="btn" data-demo="machine" aria-label="Show machine row">Show</button></div></li>
+        <li id="p-cpu"><div class="item"><div>
+          <h3>CPU per job</h3>
+          <p>Each running job shows the CPU its process tree is using, matched by the pid in its file name through the <code>Process V2</code> counters and walked down through <code>Creating Process ID</code>. A job whose file has gone quiet while its processes stay busy reads as quiet, not stalled, like reindex.sh here. A stalled job whose process has ended says so. Below 40 columns a running job's CPU gives way to its name.</p>
+        </div><button type="button" class="btn" data-demo="cpu" aria-label="Show CPU per job">Show</button></div></li>
+        <li id="p-forecast"><div class="item"><div>
+          <h3>Limit forecast</h3>
+          <p>When the last few readings say the five-hour limit runs out before it resets, its figures give the time, such as <code>82% · full by 14:39</code>, in the warning colour. Otherwise they keep the reset time.</p>
+        </div><button type="button" class="btn" data-demo="forecast" aria-label="Show limit forecast">Show</button></div></li>
+        <li id="p-added"><div class="item"><div>
+          <h3>Context added last turn</h3>
+          <p>The context figures end with what the last turn added, such as <code>+12k</code>, so a large file read shows up as soon as it lands. The mod takes the difference between the <code>$.session.usage()</code> readings at <code>turn.start</code> and <code>turn.complete</code>.</p>
+        </div><button type="button" class="btn" data-demo="added" aria-label="Show context added last turn">Show</button></div></li>
+      </ol>
+      <p class="gap">Not proposed: hiding Claude Code's agent list under the prompt, which has no render hook a mod can use, and CPU or GPU temperature, which this laptop exposes only through a kernel driver run as administrator. A rewritten prompt hint replaces Claude Code's line, and its live parts may stop updating, so that change needs testing first.</p>
       <p class="gap">Not shown: shells Claude starts in the background. The <code>tool.call</code> hook sees one start, but the call returns at once, so the pane would not see it end. That needs testing before the pane promises it.</p>
       <p class="facts">While a script runs, its file holds one line, <code>&lt;startedEpochSec&gt; &lt;step&gt; &lt;total&gt; &lt;label...&gt;</code>, in <code>.claude/progress/&lt;script&gt;-&lt;pid&gt;.txt</code>. When it finishes the line becomes <code>&lt;startedEpochSec&gt; done &lt;exitCode&gt; &lt;endedEpochSec&gt;</code>. A script with no step count writes a total of 0 and gets a spinner and elapsed time instead of a bar, like sync-fixtures.sh here. In a terminal narrower than 144 columns the pane does not open by itself, which leaves the status line, written at every width; <code>/progress</code> opens the pane at any width.</p>
     </section>
@@ -454,18 +609,27 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   const mk = o => Object.assign({
     status: "running", step: 0, total: 0, elapsed: 0, every: 0, pace: 0, paceN: 3, due: 0, exit: 0, bad: false,
     finSeq: 0, open: false, confirm: false, asked: false, dismissed: false, copied: null, log: [],
+    cpu: 0, cpuBase: 0, quietFor: 0, gone: false, offstage: false,
   }, o, { lastStep: o.elapsed, due: o.every || 0 });
+  // A running job whose file has not changed for this long, while its processes stay busy, reads as quiet.
+  const QUIET_AFTER_SECONDS = 600;
+  // A dismissed job is hidden by the person; an offstage one is left out of the still frame.
+  const isShown = j => !j.dismissed && !j.offstage;
+  // CPU at or above this counts as busy, for a quiet job and for the speed warning.
+  const BUSY_CPU_PERCENT = 50;
 
   // Sample records for the mockup. Elapsed times are in seconds at the moment the page opens.
   const seed = () => [
-    mk({ id: "build", name: "build.sh", pid: 48213, started: "14:02:31", step: 7, total: 12, elapsed: 72, every: 2.4, pace: 2.4,
+    mk({ id: "build", name: "build.sh", pid: 48213, started: "14:02:31", step: 7, total: 12, elapsed: 72, every: 2.4, pace: 2.4, cpuBase: 92,
       log: ["compiling server", "  src/server/routes.ts", "compiling assets", "  src/assets/icons.ts"] }),
-    mk({ id: "tests", name: "test-suite.ps1", pid: 48307, started: "14:02:55", step: 12, total: 48, elapsed: 48, every: 1.15, pace: 1.15,
+    mk({ id: "tests", name: "test-suite.ps1", pid: 48307, started: "14:02:55", step: 12, total: 48, elapsed: 48, every: 1.15, pace: 1.15, cpuBase: 64,
       log: ["  ok  tests/api/case-10", "  ok  tests/api/case-11", "  ok  tests/db/case-12"] }),
-    mk({ id: "sync", name: "sync-fixtures.sh", pid: 48364, started: "14:03:12", elapsed: 31, every: 3.2, endsAt: 52,
+    mk({ id: "sync", name: "sync-fixtures.sh", pid: 48364, started: "14:03:12", elapsed: 31, every: 3.2, endsAt: 52, cpuBase: 6,
       log: ["fetched users.json", "fetched orders.json", "fetched products.json"] }),
     mk({ id: "deploy", name: "deploy-preview.sh", pid: 47951, started: "13:49:12", status: "stalled", step: 3, total: 9, elapsed: 250,
-      stalledAfter: 250, fixedLabel: "uploading bundle", log: ["building preview 8f2c1d9", "bundle ready  2.1 MB", "uploading bundle  part 2 of 4"] }),
+      stalledAfter: 250, gone: true, fixedLabel: "uploading bundle", log: ["building preview 8f2c1d9", "bundle ready  2.1 MB", "uploading bundle  part 2 of 4"] }),
+    mk({ id: "reindex", name: "reindex.sh", pid: 48090, started: "13:51:04", step: 5, total: 6, elapsed: 742, every: 60, pace: 120, cpuBase: 97,
+      quietFor: 690, fixedLabel: "merging index shards", log: ["built shard 4 of 6", "built shard 5 of 6", "merging index shards"] }),
     mk({ id: "migrate", name: "migrate.sh", pid: 47866, started: "13:58:10", status: "finished", step: 3, total: 7, elapsed: 41, exit: 1, bad: true, finSeq: 1,
       errLine: 'ERROR: relation "orders" does not exist', reads: "migrations/0007_orders_index.sql",
       log: ["connecting to orders_dev", "applying 0007_orders_index.sql", 'ERROR: relation "orders" does not exist', "rolled back 0007"] }),
@@ -475,12 +639,13 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 
   const jobs = new Map();
   let paused = false;
+  // "all" holds the terminal still with every next proposal showing; "live" runs the simulation.
+  let view = "all";
   let frame = 0;
   let lastTick = performance.now();
   let finCounter = 1;
   let restartIn = null;
   let gen = 0;
-  let lastStatus = "";
 
   const $ = id => document.getElementById(id);
   const fmt = s => {
@@ -492,6 +657,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
   const setText = (el, t) => { if (el.textContent !== t) el.textContent = t; };
   const setHidden = (el, h) => { if (el.hidden !== h) el.hidden = h; };
+  const setHTML = (el, h) => { if (el.dataset.html !== h) { el.innerHTML = h; el.dataset.html = h; } };
   const pathOf = j => `.claude/progress/${j.name}-${j.pid}.txt`;
   const finText = j => (j.bad ? `failed after ${fmt(j.elapsed)}, exit ${j.exit}` : `done in ${fmt(j.elapsed)}`);
   const announce = t => { $("announce").textContent = t; };
@@ -580,7 +746,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     const fin = j.status === "finished", stalled = j.status === "stalled", running = j.status === "running", stepped = j.total > 0;
     v.root.classList.toggle("finished", fin);
     v.root.classList.toggle("stalled", stalled);
-    setHidden(v.root, j.dismissed);
+    setHidden(v.root, !isShown(j));
     v.btn.setAttribute("aria-expanded", String(j.open));
     if (v.wasOpen !== j.open) {
       v.wasOpen = j.open;
@@ -592,12 +758,15 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
       }
     }
 
-    // Top row, right side
+    // Top row, right side: the CPU of the job's process tree, then its step. A narrow pane drops a running job's CPU.
     let right;
-    if (fin) right = finText(j);
-    else if (stepped) right = `${j.step}/${j.total}  ${String(Math.round((j.step / j.total) * 100)).padStart(3, " ")}%`;
-    else right = "no step count";
-    setText(v.r1r, right);
+    if (fin) right = esc(finText(j));
+    else {
+      const cpu = stalled ? (j.gone ? "process ended · " : "cpu 0% · ") : `<span class="r-cpu">cpu ${Math.round(j.cpu)}% · </span>`;
+      const step = stepped ? `${j.step}/${j.total}  ${String(Math.round((j.step / j.total) * 100)).padStart(3, " ")}%` : "no step count";
+      right = cpu + step;
+    }
+    setHTML(v.r1r, right);
     v.r1r.classList.toggle("bad", fin && j.bad);
     v.r1r.classList.toggle("ok", fin && !j.bad);
     v.r1r.classList.toggle("step", !fin && !stepped);
@@ -615,13 +784,16 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
       if (!stepped) setText(v.spin, (reduce.matches ? "…" : SPIN[frame % SPIN.length]) + " ");
       setText(v.lbl, labelOf(j));
       let t3;
+      const quiet = running && j.quietFor >= QUIET_AFTER_SECONDS && j.cpu >= BUSY_CPU_PERCENT;
       if (stalled) t3 = `stalled after ${fmt(j.stalledAfter)}`;
+      else if (quiet) t3 = `quiet ${fmt(j.quietFor)} · busy`;
       else if (stepped && j.step >= 3) {
         const left = Math.max(5, Math.round((j.pace * (j.total - j.step)) / 5) * 5);
         t3 = `${fmt(j.elapsed)} · about ${fmtLeft(left)} left`;
       } else t3 = fmt(j.elapsed);
       setText(v.t3, t3);
       v.t3.classList.toggle("stalled", stalled);
+      v.t3.classList.toggle("quiet", quiet);
     }
 
     // Details
@@ -661,15 +833,13 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     if (active && active !== document.body && active !== document.activeElement && document.contains(active)) active.focus({ preventScroll: true });
   }
 
-  const shortName = n => n.replace(/\.(sh|ps1)$/, "").replace("test-suite", "tests").replace("sync-fixtures", "sync");
-
   function updateSummary() {
     const all = [...jobs.values()];
-    const vis = all.filter(j => !j.dismissed);
+    const vis = all.filter(isShown);
     const active = vis.filter(j => j.status !== "finished");
     const running = active.filter(j => j.status === "running").length;
     const stalledN = active.length - running;
-    const hiddenN = all.length - vis.length;
+    const hiddenN = all.filter(j => j.dismissed).length;
 
     const bits = [];
     if (running) bits.push(`${running} running`);
@@ -679,28 +849,15 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     setText($("unhide"), `${hiddenN} hidden`);
     setHidden($("finished-label"), !vis.some(j => j.status === "finished"));
     setHidden($("nojobs"), vis.length > 0);
-
-    const narrow = $("term").dataset.cols === "100";
-    const part = j => {
-      const s = shortName(j.name);
-      if (j.status === "stalled") return `${s} <b class="stall">stalled</b>`;
-      if (j.total === 0) return `${s} <b>running</b>`;
-      return `${s} <b>${Math.round((j.step / j.total) * 100)}%</b>`;
-    };
-    // The mod writes the same summary at every width, and clears it once no job runs or stalls.
-    const named = active.slice(0, 2).map(part);
-    const more = active.length - named.length;
-    const jobsText = named.join(" · ") + (more > 0 ? ` · ${more} more` : "");
-    const summary = active.length > 0 ? `<span class="jobs">${jobsText}</span>` : "";
-    const hint = narrow && active.length > 0 ? `<span class="hint">/progress opens the pane</span>` : "";
-    const html = `<span>Opus 5.5</span><span>shell-progress</span>${summary}${hint}`;
-    if (html !== lastStatus) { $("status").innerHTML = html; lastStatus = html; }
   }
 
   function render() {
     jobs.forEach(updateJob);
     updateSummary();
     renderSession();
+    renderFooter();
+    // An expanded or dismissed row in the still frame moves the targets under the pins.
+    placeMarks();
   }
 
   /* ---------- Transcript ---------- */
@@ -755,6 +912,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   }
 
   function advance(j) {
+    j.quietFor = 0;
     if (j.total === 0) {
       pushLog(j, `fetched ${FILES[Math.floor(j.elapsed / 3.2) % FILES.length]}`);
       if (j.elapsed >= j.endsAt) finish(j, 0);
@@ -766,6 +924,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     j.paceN++;
     j.lastStep = j.elapsed;
     if (j.id === "build") pushLog(j, BUILD[j.step - 1], ...(BUILD_DETAIL[j.step] ? [BUILD_DETAIL[j.step]] : []));
+    if (j.id === "reindex") pushLog(j, "merged 6 shards into search.idx");
     if (j.id === "tests") {
       if (j.step === 40) {
         j.errLine = "FAILED tests/integration/case-40: expected 3 rows, got 2";
@@ -782,12 +941,17 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     const now = performance.now();
     const dt = Math.min(0.5, (now - lastTick) / 1000);
     lastTick = now;
-    if (paused) return;
+    if (paused || view === "all") return;
     frame++;
     if (restartIn !== null && (restartIn -= dt) <= 0) restart();
     simTick(dt);
     const live = [...jobs.values()].filter(j => j.status === "running");
-    live.forEach(j => { j.elapsed += dt; j.due -= dt; });
+    live.forEach(j => {
+      j.elapsed += dt;
+      j.due -= dt;
+      j.quietFor += dt;
+      j.cpu = Math.max(0, Math.min(100, j.cpuBase + 5 * Math.sin(S.t * 0.7 + j.pid)));
+    });
     // One state change per tick, so each can be followed.
     const ready = live.filter(j => j.due <= 0).sort((a, b) => a.due - b.due)[0];
     if (ready) { ready.due += ready.every; advance(ready); }
@@ -828,13 +992,13 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   ];
 
   const AGENT_SPECS = [
-    { id: "review-migrations", hex: "a3f9c1", type: "router-expert", startAt: 0, runFor: 40, talk: [
+    { id: "review-migrations", hex: "a3f9c1", type: "router-expert", startAt: 0, runFor: 40, tokens: 65200, talk: [
       { k: "you", text: "Review migrations/ for anything that would fail when 0007 applies" },
       { k: "tool", tool: "Read", arg: "migrations/0006_orders.sql", res: "Read 52 lines" },
       { k: "tool", tool: "Grep", arg: '"CREATE INDEX" in migrations/', res: "Found 4 matches" },
       { k: "say", text: "0007 builds its index before the orders table exists on a fresh database. Move it after 0006." },
     ] },
-    { id: "find-callers", hex: "7be204", type: "router-scout", startAt: 10, runFor: 25, talk: [
+    { id: "find-callers", hex: "7be204", type: "router-scout", startAt: 10, runFor: 25, tokens: 38400, talk: [
       { k: "you", text: "Find every caller of the orders index helper" },
       { k: "tool", tool: "Grep", arg: '"ensure_orders_index" in src/', res: "Found 6 matches" },
       { k: "tool", tool: "Read", arg: "src/db/orders.ts", res: "Read 118 lines" },
@@ -843,10 +1007,14 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   ];
   const seedAgents = () => AGENT_SPECS.map(s => ({ ...s, started: fmtClock(CLOCK0 + s.startAt), status: "waiting", elapsed: 0, open: false }));
 
+  // limitRate is the five-hour limit's use in percent per hour; added is the context the last turn added, in thousands of tokens.
   const freshSession = () => ({
     t: 0, phase: "turn", turnT: 0, idleT: 0, next: 0, cur: null, recent: [], fresh: false,
-    ctx: 38, limit: 63, cents: 184, lastTurn: 0,
+    ctx: 38, ctxAtStart: 38, addedThousands: null, limit: 63, limitRate: 12, cents: 184, lastTurn: 0,
+    throttleSecondsLeft: 0, batterySecondsLeft: 0,
   });
+  const LIMIT_RESET_SECONDS = 16 * 3600;
+  const fmtK = n => `${(n / 1000).toFixed(1)}k`;
   let S = freshSession();
   const agents = new Map();
   const recentRows = [];
@@ -913,17 +1081,38 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     if (running) setText(v.spin, (reduce.matches ? "…" : SPIN[frame % SPIN.length]) + " ");
     setText(v.st, a.status);
     v.st.classList.toggle("ok", !running);
-    setText(v.t3, fmt(a.elapsed));
+    // The Agent tool's result carries the tokens; the agent list does not, so a running agent shows only its time.
+    setText(v.t3, running ? fmt(a.elapsed) : `${fmt(a.elapsed)} · ${fmtK(a.tokens)} tokens`);
   }
 
-  function setGauge(prefix, pct, right) {
-    const m = $(`${prefix}-m`), f = m.lastElementChild;
+  function setGauge(prefix, pct, right, warn) {
+    const m = $(`${prefix}-m`), f = m.lastElementChild, r = $(`${prefix}-r`);
     const w = `inset(0 ${100 - pct}% 0 0)`;
     if (f.style.clipPath !== w) f.style.clipPath = w;
     m.classList.toggle("hot", pct >= 80);
     m.setAttribute("aria-valuenow", String(pct));
-    m.setAttribute("aria-valuetext", right.replace(/\s+/g, " "));
-    setText($(`${prefix}-r`), right);
+    m.setAttribute("aria-valuetext", right.replace(/ · /g, ", "));
+    setText(r, right);
+    r.classList.toggle("warn", warn);
+  }
+
+  // Seconds of the day at which the five-hour limit runs out at its current rate.
+  const limitFullAt = s => CLOCK0 + s.t + ((100 - s.limit) / s.limitRate) * 3600;
+  const hhmm = secondsOfDay => fmtClock(Math.floor(secondsOfDay)).slice(0, 5);
+
+  function renderMachine(liveJobs) {
+    setHidden($("mach-row"), liveJobs.length === 0);
+    if (liveJobs.length === 0) return;
+    const cpu = Math.min(100, Math.round(12 + liveJobs.reduce((sum, j) => sum + j.cpu, 0) * 0.3));
+    const gpu = Math.round(4 + 2 * Math.sin(S.t * 0.4));
+    const free = (11.2 - 0.4 * liveJobs.length).toFixed(1);
+    // Warnings get a line of their own, so a narrow pane cuts the readings, never a warning.
+    const warnings = [];
+    // % Processor Performance under 100 means anything only while the CPU is busy.
+    if (S.throttleSecondsLeft > 0 && cpu >= BUSY_CPU_PERCENT) warnings.push("held at 78% speed");
+    if (S.batterySecondsLeft > 0) warnings.push("on battery, 41%");
+    const warnLine = warnings.length ? `<span class="warn">${warnings.join(" · ")}</span>` : "";
+    setHTML($("mach"), `cpu ${cpu}% · gpu ${gpu}% · ${free} GB free${warnLine}`);
   }
 
   function renderSession() {
@@ -957,8 +1146,15 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     if (s.fresh) { s.fresh = false; flash(recentRows[0].root); }
 
     agents.forEach(updateAgent);
-    setGauge("ctx", s.ctx, `${s.ctx}%  ${s.ctx * 2}k of 200k`);
-    setGauge("lim", s.limit, `${s.limit}%  resets 16:00`);
+    renderMachine([...jobs.values()].filter(j => j.status === "running"));
+    // A turn that compacted shows what it freed; one that added nothing shows nothing.
+    const k = s.addedThousands;
+    const added = !k ? "" : ` · ${k > 0 ? "+" : "-"}${Math.abs(k)}k`;
+    setGauge("ctx", s.ctx, `${s.ctx}% · ${s.ctx * 2}k of 200k${added}`, false);
+    const fullAt = limitFullAt(s);
+    const runsOut = fullAt < LIMIT_RESET_SECONDS;
+    const limitText = runsOut ? `full by ${hhmm(fullAt)}` : `resets ${hhmm(LIMIT_RESET_SECONDS)}`;
+    setGauge("lim", s.limit, `${s.limit}% · ${limitText}`, runsOut);
     setText($("cost"), `session cost $${(s.cents / 100).toFixed(2)}`);
   }
 
@@ -1001,9 +1197,11 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     S.lastTurn = S.turnT;
     S.idleT = 0;
     S.limit = Math.min(100, S.limit + 1);
+    S.addedThousands = (S.ctx - S.ctxAtStart) * 2;
   }
 
   function startTurn() {
+    S.ctxAtStart = S.ctx;
     S.phase = "turn";
     S.turnT = 0;
     S.next = 0;
@@ -1022,6 +1220,8 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
 
   function simTick(dt) {
     S.t += dt;
+    S.throttleSecondsLeft = Math.max(0, S.throttleSecondsLeft - dt);
+    S.batterySecondsLeft = Math.max(0, S.batterySecondsLeft - dt);
     stepAgents();
     if (S.phase === "idle") {
       S.idleT += dt;
@@ -1210,6 +1410,146 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     }
   });
 
+  /* ---------- Lines under the prompt ---------- */
+  // "now" draws them as Claude Code and the status line script draw them today; "trimmed" as proposed.
+  let footerMode = "trimmed";
+
+  const shortName = n => n.replace(/\.(sh|ps1)$/, "").replace("test-suite", "tests").replace("sync-fixtures", "sync");
+
+  function jobSummary() {
+    const active = [...jobs.values()].filter(j => isShown(j) && j.status !== "finished");
+    const part = j => {
+      const s = shortName(j.name);
+      if (j.status === "stalled") return `${s} <b class="stall">stalled</b>`;
+      if (j.total === 0) return `${s} <b>running</b>`;
+      return `${s} <b>${Math.round((j.step / j.total) * 100)}%</b>`;
+    };
+    const named = active.slice(0, 2).map(part);
+    const more = active.length - named.length;
+    return named.join(" · ") + (more > 0 ? ` · ${more} more` : "");
+  }
+
+  function renderFooter() {
+    const trimmed = view === "all" || footerMode === "trimmed";
+    const paneShown = $("term").dataset.cols === "160";
+    const running = [...agents.values()].filter(a => a.status === "running");
+    const diff = `<span class="add">+318</span> <span class="del">-8</span>`;
+    const cost = `$${(S.cents / 100).toFixed(2)}`;
+
+    setHTML($("script-top"), `<span class="ink">Opus 5.5</span> high │ <span class="ink">shell-progress</span> │ feat/session-pane${trimmed ? ` │ ${diff}` : ""}`);
+    setHidden($("script-usage"), trimmed);
+    if (!trimmed) {
+      const lit = Math.round((S.ctx / 100) * 10);
+      setHTML($("script-usage"), `<span class="ctxbar"><b>${"━".repeat(lit)}</b>${"━".repeat(10 - lit)}</span> ${S.ctx}% of 200k · ${cost} · ${diff} · 5h ${S.limit}%`);
+    }
+
+    const mode = `<span class="mode">▸▸ bypass permissions on</span>`;
+    const hintParts = trimmed ? [mode] : [`${mode} (shift+tab to cycle)`];
+    if (running.length > 0) {
+      const count = `${running.length} agent${running.length === 1 ? "" : "s"}`;
+      if (trimmed) hintParts.push(count);
+      else hintParts.push("/tasks to see subagents", `← ${count}`);
+    }
+    setHTML($("hint"), hintParts.join(" · "));
+
+    // The mod's own line: the jobs, plus the usage figures while the pane is closed.
+    const jobsText = jobSummary();
+    const bits = jobsText ? [`<span class="jobs">${jobsText}</span>`] : [];
+    if (trimmed && !paneShown) bits.push(`ctx ${S.ctx}% · 5h ${S.limit}% · ${cost}`);
+    if (!paneShown && jobsText) bits.push("/progress opens the pane");
+    setHidden($("status"), bits.length === 0);
+    setHTML($("status"), bits.join("   "));
+
+    // Claude Code's agent list: no render hook reaches it, so it looks the same either way.
+    const rows = running.map(a => {
+      const live = fmtK((a.elapsed / a.runFor) * a.tokens);
+      return `<div class="arow"><span class="a-type">○ ${a.type}</span><span class="a-task">${esc(a.talk[0].text)}</span><span class="a-time">${fmt(a.elapsed)} · ↓ ${live} tokens</span></div>`;
+    });
+    setHidden($("alist"), rows.length === 0);
+    setHTML($("alist"), rows.length ? `<div class="arow"><span class="ink">● main</span></div>${rows.join("")}` : "");
+  }
+
+  function setFooter(mode) {
+    footerMode = mode;
+    document.querySelectorAll("button[data-footer]").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.footer === mode)));
+    const url = new URL(location.href);
+    url.searchParams.set("footer", mode);
+    try { history.replaceState(null, "", url); } catch (e) { /* file: URLs may refuse */ }
+    render();
+  }
+  document.querySelectorAll("button[data-footer]").forEach(b => b.addEventListener("click", () => setFooter(b.dataset.footer)));
+
+  /* ---------- Pane width: dragged or keyed, kept in this browser ---------- */
+  const PANE_MIN_COLUMNS = 24;
+  const PANE_ASKED_COLUMNS = 48;
+  const PANE_KEY = "shell-progress-mockup-pane-cols";
+  let paneWanted = PANE_ASKED_COLUMNS;
+  let paneCols = PANE_ASKED_COLUMNS;
+
+  const chWidth = () => $("probe").getBoundingClientRect().width / $("probe").textContent.length;
+  const panePadding = () => 2 * parseFloat(getComputedStyle($("pane")).paddingLeft) + 1;
+  // At most 45% of the terminal's columns, and never so wide that the transcript loses 55% of the window.
+  function paneMax() {
+    const byCols = Math.floor(Number($("term").dataset.cols) * 0.45);
+    const width = document.querySelector(".screen").getBoundingClientRect().width;
+    return Math.max(PANE_MIN_COLUMNS, Math.min(byCols, Math.floor((width * 0.45 - panePadding()) / chWidth())));
+  }
+
+  // The width shown is the wanted width held inside the limits the window allows now.
+  function fitPane() {
+    const max = paneMax();
+    // The still frame shows the width the mod asks for, whatever width was dragged in Live.
+    const wanted = view === "all" ? PANE_ASKED_COLUMNS : paneWanted;
+    paneCols = Math.max(PANE_MIN_COLUMNS, Math.min(max, wanted));
+    $("term").style.setProperty("--pane-cols", String(paneCols));
+    grip.setAttribute("aria-valuemax", String(max));
+    grip.setAttribute("aria-valuenow", String(paneCols));
+    grip.setAttribute("aria-valuetext", `${paneCols} columns`);
+    showCols();
+  }
+
+  function setPaneCols(n, persist) {
+    paneWanted = Math.max(PANE_MIN_COLUMNS, Math.min(paneMax(), Math.round(n)));
+    fitPane();
+    if (persist) { try { localStorage.setItem(PANE_KEY, String(paneWanted)); } catch (e) { /* storage may be blocked */ } }
+  }
+
+  function showCols() {
+    const cols = $("term").dataset.cols;
+    $("cols").textContent = cols === "160" ? `${cols} × 34 · pane ${paneCols}` : `${cols} × 34`;
+  }
+
+  const grip = $("grip");
+  grip.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    grip.classList.add("dragging");
+    const right = document.querySelector(".screen").getBoundingClientRect().right;
+    const ch = chWidth(), pad = panePadding();
+    const move = ev => setPaneCols((right - ev.clientX - pad) / ch, false);
+    const end = () => {
+      grip.classList.remove("dragging");
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", end);
+      grip.removeEventListener("pointercancel", end);
+      setPaneCols(paneCols, true);
+      announce(`Pane ${paneCols} columns wide`);
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", end);
+    grip.addEventListener("pointercancel", end);
+  });
+  // The separator sits on the pane's left edge, so the left arrow widens the pane.
+  grip.addEventListener("keydown", e => {
+    const by = e.shiftKey ? 8 : 2;
+    if (e.key === "ArrowLeft") setPaneCols(paneCols + by, true);
+    else if (e.key === "ArrowRight") setPaneCols(paneCols - by, true);
+    else return;
+    e.preventDefault();
+  });
+  addEventListener("resize", fitPane);
+
   /* ---------- Page controls ---------- */
   function setPane(mode) {
     const session = mode === "session";
@@ -1232,7 +1572,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   function setCols(cols) {
     document.querySelectorAll("button[data-cols]").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.cols === cols)));
     $("term").dataset.cols = cols;
-    $("cols").textContent = `${cols} × 34`;
+    fitPane();
     const url = new URL(location.href);
     url.searchParams.set("cols", cols);
     try { history.replaceState(null, "", url); } catch (e) { /* file: URLs may refuse */ }
@@ -1260,6 +1600,7 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
   };
   const needsWide = () => { if ($("term").dataset.cols !== "160") setCols("160"); };
   const needsBuild = () => { needsWide(); if (jobs.get("build").status !== "running") restart(); return jobs.get("build"); };
+  const showInPane = el => { setPane("session"); needsWide(); render(); reveal(null); flash(el); };
 
   const demos = {
     session() { setPane("session"); setCols("160"); reveal(null); },
@@ -1282,20 +1623,137 @@ h1 { margin: 0; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2.125rem); line-height:
     5() { const j = needsBuild(); j.open = true; render(); reveal(j); },
     6() { const j = needsBuild(); j.open = true; render(); reveal(j); },
     7() { const j = needsBuild(); j.open = true; j.confirm = true; render(); reveal(j); },
+    bars() { showInPane($("foot")); },
+    width() { setPane("session"); needsWide(); reveal(null); grip.focus(); announce("Pane width separator: press the arrow keys or drag it"); },
+    footer() { setFooter("trimmed"); reveal(null); flash($("footer")); },
+    agents() { showInPane($("agents")); },
+    machine() { needsBuild(); S.throttleSecondsLeft = 20; S.batterySecondsLeft = 20; showInPane($("foot")); },
+    cpu() {
+      needsWide();
+      if (jobs.get("reindex").status !== "running") restart();
+      const j = jobs.get("reindex");
+      j.open = true;
+      render();
+      reveal(j);
+    },
+    forecast() { S.limit = 82; S.limitRate = 30; showInPane($("foot")); },
+    added() { showInPane($("foot")); },
   };
-  document.querySelectorAll("[data-demo]").forEach(b => b.addEventListener("click", () => demos[b.dataset.demo]()));
+  document.querySelectorAll("[data-demo]").forEach(b => b.addEventListener("click", () => { if (view === "all") setView("live"); demos[b.dataset.demo](); }));
+
+  /* ---------- All proposals: one still frame with every next proposal on screen ---------- */
+  // Each pin sits on the pane's left border, the terminal's left edge or the terminal's right edge, beside its target.
+  const MARKS = [
+    { target: () => $("ctx-m").parentElement, side: "left" },
+    { target: () => $("pane"), side: "left" },
+    { target: () => $("script-top"), side: "left" },
+    { target: () => agents.get("review-migrations").v.t3, side: "right" },
+    { target: () => $("mach-row"), side: "left" },
+    { target: () => jobs.get("reindex").v.r1r, side: "right" },
+    { target: () => $("lim-r"), side: "right" },
+    { target: () => $("ctx-r"), side: "right" },
+  ];
+  const pins = MARKS.map((m, i) => {
+    const pin = document.createElement("span");
+    pin.className = "pin";
+    pin.textContent = String(i + 1);
+    $("marks").appendChild(pin);
+    return pin;
+  });
+
+  // Half a terminal line, so a pin centres on its target's first line; the pane's pin centres on the pane title.
+  const FIRST_LINE_MIDDLE_PX = 10;
+  const PANE_TITLE_MIDDLE_PX = 22;
+
+  function placeMarks() {
+    if (view !== "all") return;
+    const frameBox = $("frame").getBoundingClientRect(), term = $("term").getBoundingClientRect(), pane = $("pane").getBoundingClientRect();
+    MARKS.forEach((m, i) => {
+      const el = m.target(), r = el.getBoundingClientRect();
+      const x = m.side === "right" ? term.right : ($("pane").contains(el) ? pane.left : term.left);
+      const y = el === $("pane") ? pane.top + PANE_TITLE_MIDDLE_PX : r.top + Math.min(r.height / 2, FIRST_LINE_MIDDLE_PX);
+      pins[i].style.left = `${x - frameBox.left}px`;
+      pins[i].style.top = `${y - frameBox.top}px`;
+    });
+  }
+
+  function lightMark(i, lit) {
+    MARKS[i].target().classList.toggle("lit-target", lit);
+    pins[i].classList.toggle("lit", lit);
+  }
+  const unlightAll = () => MARKS.forEach((m, i) => lightMark(i, false));
+  // Each key entry takes its title from the proposal it links to, and its number from its place in the key.
+  document.querySelectorAll(".key a").forEach((a, i) => {
+    a.querySelector("b").textContent = document.querySelector(`${a.getAttribute("href")} h3`).textContent;
+    a.addEventListener("pointerenter", () => lightMark(i, true));
+    a.addEventListener("pointerleave", () => lightMark(i, false));
+    a.addEventListener("focus", () => lightMark(i, true));
+    a.addEventListener("blur", () => lightMark(i, false));
+    a.addEventListener("click", unlightAll);
+  });
+
+  // Applied to a fresh simulation: the few changes that put every proposal on screen at once.
+  function stageAll() {
+    setPane("session");
+    setCols("160");
+    ["tests", "sync", "migrate", "lint"].forEach(id => { jobs.get(id).offstage = true; });
+    Object.assign(jobs.get("build"), { step: 8, elapsed: 84, cpu: 91 });
+    jobs.get("reindex").cpu = 97;
+    const review = agents.get("review-migrations");
+    Object.assign(review, { status: "completed", elapsed: review.runFor });
+    Object.assign(agents.get("find-callers"), { status: "running", elapsed: 22 });
+    Object.assign(S, {
+      t: 32, phase: "turn", turnT: 31, ctx: 44, addedThousands: 12, limit: 82, limitRate: 30,
+      throttleSecondsLeft: Infinity, batterySecondsLeft: Infinity,
+      cur: { tool: "Bash", arg: "npm test -- orders", at: 27 },
+    });
+    render();
+  }
+
+  // The pane and width chosen in Live, put back when the still frame is left.
+  let liveChoice = null;
+
+  function setView(next, isStart) {
+    if (next === view && !isStart) return;
+    unlightAll();
+    if (next === "all") liveChoice = { pane: $("pane").dataset.mode, cols: $("term").dataset.cols };
+    view = next;
+    $("wrap").dataset.view = next;
+    document.querySelectorAll("button[data-view]").forEach(o => o.setAttribute("aria-pressed", String(o.dataset.view === next)));
+    const url = new URL(location.href);
+    url.searchParams.set("view", next);
+    try { history.replaceState(null, "", url); } catch (e) { /* file: URLs may refuse */ }
+    grip.tabIndex = next === "all" ? -1 : 0;
+    restart();
+    resetSession();
+    if (next === "all") stageAll();
+    else if (liveChoice) { setPane(liveChoice.pane); setCols(liveChoice.cols); }
+    fitPane();
+    placeMarks();
+  }
+  document.querySelectorAll("button[data-view]").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+  new ResizeObserver(placeMarks).observe($("frame"));
+  document.fonts.ready.then(placeMarks);
 
   /* ---------- Start ---------- */
   seed().forEach(o => { jobs.set(o.id, o); createView(o); });
   place();
   createRecentRows();
-  $("ctx-m").firstElementChild.textContent = "░".repeat(BAR);
-  $("ctx-m").lastElementChild.textContent = "█".repeat(BAR);
-  $("lim-m").firstElementChild.textContent = "░".repeat(BAR);
-  $("lim-m").lastElementChild.textContent = "█".repeat(BAR);
+  // The gauges stretch with the pane, so their text runs past the widest bar (72 columns) and is clipped.
+  const METER_TEXT_CELLS = 80;
+  ["ctx-m", "lim-m"].forEach(id => {
+    $(id).firstElementChild.textContent = "░".repeat(METER_TEXT_CELLS);
+    $(id).lastElementChild.textContent = "█".repeat(METER_TEXT_CELLS);
+  });
   resetSession();
-  setPane(new URLSearchParams(location.search).get("pane") === "jobs" ? "jobs" : "session");
-  setCols(new URLSearchParams(location.search).get("cols") === "100" ? "100" : "160");
+  const params = new URLSearchParams(location.search);
+  setPane(params.get("pane") === "jobs" ? "jobs" : "session");
+  setFooter(params.get("footer") === "now" ? "now" : "trimmed");
+  setCols(params.get("cols") === "100" ? "100" : "160");
+  let keptCols = NaN;
+  try { keptCols = Number(localStorage.getItem(PANE_KEY)); } catch (e) { /* storage may be blocked */ }
+  paneWanted = keptCols >= PANE_MIN_COLUMNS ? Math.round(keptCols) : PANE_ASKED_COLUMNS;
+  setView(params.get("view") === "live" ? "live" : "all", true);
   lastTick = performance.now();
   setInterval(tick, 120);
 })();

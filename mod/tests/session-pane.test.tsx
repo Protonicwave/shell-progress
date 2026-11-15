@@ -1,8 +1,17 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { AgentInfo, AgentStatus, ToolCallResult } from 'claude-code'
+import type { AgentInfo, AgentStatus, On, ToolCallResult } from 'claude-code'
 
-import { POLL_MS, START_MS, fakeWorld, mountPane, startSession } from './fake-world'
+import {
+  PANE,
+  POLL_MS,
+  START_MS,
+  completedAgentRecord,
+  fakeWorld,
+  mountPane,
+  runningLine,
+  startSession,
+} from './fake-world'
 
 const TURN_ID = 'turn-1'
 
@@ -170,26 +179,89 @@ test('a pane with no jobs, agents or calls draws none of their groups', async ($
   await ui.unmount()
 })
 
-test('the usage bars and the cost are drawn from the session\'s figures', async ($, on) => {
+const HIGH_USAGE = {
+  startedAt: START_MS,
+  context: { tokens: 170_000, window: 200_000, percent: 85 },
+  rateLimits: [{ kind: 'five_hour', percentUsed: 40 }],
+  cost: { usd: 1.84 },
+}
+
+test('each usage bar shares a row with its label and figures, and the cost follows', async ($, on) => {
   const { world } = fakeWorld(on, new Map())
-  world.usage = {
-    startedAt: START_MS,
-    context: { tokens: 170_000, window: 200_000, percent: 85 },
-    rateLimits: [{ kind: 'five_hour', percentUsed: 40 }],
-    cost: { usd: 1.84 },
-  }
+  world.usage = HIGH_USAGE
   await startSession($)
 
   const ui = await mountPane($)
-  expect((await ui.find({ type: 'Text', text: /^85% · / }))?.text).toBe('85% · 170k of 200k')
-  expect((await ui.find({ type: 'Text', text: /^40%$/ }))?.text).toBe('40%')
+  expect((await ui.find({ key: 'context' }))?.text).toMatch(/^context[█▏▎▍▌▋▊▉░]+85% · 170k of 200k$/)
+  expect((await ui.find({ key: '5h limit' }))?.text).toMatch(/^5h limit[█▏▎▍▌▋▊▉░]+40%$/)
   expect((await ui.find({ type: 'Text', text: /^session cost/ }))?.text).toBe('session cost $1.84')
-  // From 80% a bar turns to the warning colour.
+  // 40 columns less the label's 8, the widest figures' 18 and two gaps leave
+  // 12 cells for each bar. From 80% a bar turns to the warning colour.
   const filled = await ui.findAll({ type: 'Text', text: /^[█▏▎▍▌▋▊▉]+$/ })
   expect(filled.map(bar => [bar.text.length, bar.props['color']])).toEqual([
-    [33, 'warning'],
-    [16, 'claude'],
+    [11, 'warning'],
+    [5, 'claude'],
   ])
+  await ui.unmount()
+})
+
+test('the context figures end with what the last turn added', async ($, on) => {
+  const { world } = fakeWorld(on, new Map())
+  const contextAt = (tokens: number, percent: number) => ({
+    startedAt: START_MS,
+    context: { tokens, window: 200_000, percent },
+    rateLimits: [],
+  })
+  world.usage = contextAt(76_000, 38)
+  await startSession($)
+  await startTurn($)
+  world.usage = contextAt(88_000, 44)
+  await completeTurn($, 1_000)
+
+  const ui = await mountPane($)
+  expect((await ui.find({ type: 'Text', text: /^44% · / }))?.text).toBe('44% · 88k of 200k · +12k')
+  await ui.unmount()
+})
+
+test('the limit figures give the time it fills, as a warning, if that is before the reset', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  const minuteMs = 60_000
+  const resetsAt = new Date(START_MS + 300 * minuteMs).toISOString()
+  const limitAt = (percentUsed: number) => ({
+    startedAt: START_MS,
+    context: { window: 200_000 },
+    rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt }],
+  })
+  await startSession($)
+  world.usage = limitAt(50)
+  await startTurn($)
+  await completeTurn($, 1_000)
+  await clock.advance(5 * minuteMs)
+  world.usage = limitAt(60)
+  await startTurn($)
+  await completeTurn($, 1_000)
+
+  // 10 points in 5 minutes: the 40 left take 20 minutes from the second turn's end.
+  const fullClock = new Date(START_MS + 25 * minuteMs).toTimeString().slice(0, 5)
+  const ui = await mountPane($)
+  const figures = await ui.find({ type: 'Text', text: /^60% · / })
+  expect(figures?.text).toBe(`60% · full by ${fullClock}`)
+  expect(figures?.props['color']).toBe('warning')
+  await ui.unmount()
+})
+
+test('below 40 columns each usage bar takes a row of its own under its label and figures', async ($, on) => {
+  const { world } = fakeWorld(on, new Map())
+  world.usage = HIGH_USAGE
+  await startSession($)
+
+  const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 39 }, surface: 'terminal' })
+  const context = await ui.find({ key: 'context' })
+  expect(context?.props['flexDirection']).toBe('column')
+  expect(context?.text).toMatch(/^context85% · 170k of 200k[█▏▎▍▌▋▊▉░]+$/)
+  // The full width less the two columns kept clear: 37 cells.
+  const filled = await ui.findAll({ type: 'Text', text: /^[█▏▎▍▌▋▊▉]+$/ })
+  expect(filled.map(bar => bar.text.length)).toEqual([32, 15])
   await ui.unmount()
 })
 
@@ -205,9 +277,102 @@ test('a figure the session lacks leaves its bar or line out', async ($, on) => {
 
   const ui = await mountPane($)
   expect(await ui.find({ type: 'Text', text: 'context' })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: '5-hour limit' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '5h limit' })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /^session cost/ }))?.text).toBe('session cost $0.00')
   await ui.unmount()
+})
+
+const HIGH_USAGE_TAIL = ' · ctx 85% · 5h 40% · $1.84'
+const ENGINE_HINT = 'default mode · ? for shortcuts'
+
+/**
+ * Stands in for the engine's drawing of the prompt hint and records what the
+ * mod hands it. `draw` raises the hint with `handedTail` as the tail a plugin
+ * above the mod set, and answers what reached the engine.
+ */
+function engineHint(on: On) {
+  const handed: { hint: string; tail: string | undefined }[] = []
+  on('ui.render', { component: 'PromptHint' }, ($, e) => {
+    handed.push({ hint: e.props.hint, tail: e.props.tail })
+    const { Text } = $.ui.resolve(e)
+    return <Text>{e.props.hint}</Text>
+  })
+  const draw = async ($: Engine, handedTail?: string) => {
+    await $.ui.render({
+      surface: 'terminal',
+      component: 'PromptHint',
+      requestId: 'prompt-hint',
+      props: { isDraft: false, isWorking: false, hint: ENGINE_HINT, ...(handedTail === undefined ? {} : { tail: handedTail }) },
+    })
+    return handed.at(-1)
+  }
+  return draw
+}
+
+test('the prompt hint ends with the usage figures only while the pane is not in view', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  const drawHint = engineHint(on)
+  world.usage = HIGH_USAGE
+  await startSession($)
+  const pane = { id: PANE.requestId, title: PANE.props.title, isFocused: false }
+
+  const tails: (string | undefined)[] = []
+  for (const shown of [
+    [],
+    [{ ...pane, isShown: true, isPlaced: true }],
+    [{ ...pane, isShown: false, isPlaced: true }],
+    [{ ...pane, isShown: true, isPlaced: true }],
+    [{ ...pane, isShown: false, isPlaced: false }],
+  ]) {
+    world.panes = shown
+    await clock.advance(POLL_MS)
+    tails.push((await drawHint($))?.tail)
+  }
+  expect(tails).toEqual([HIGH_USAGE_TAIL, undefined, HIGH_USAGE_TAIL, undefined, HIGH_USAGE_TAIL])
+})
+
+test('the prompt hint keeps the engine\'s text and a tail another plugin added', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  const drawHint = engineHint(on)
+  world.usage = HIGH_USAGE
+  await startSession($)
+
+  await clock.advance(POLL_MS)
+  expect(await drawHint($, 'build 2/3')).toEqual({ hint: ENGINE_HINT, tail: `build 2/3${HIGH_USAGE_TAIL}` })
+})
+
+test('the prompt hint follows the usage and is left alone without figures', async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  const drawHint = engineHint(on)
+  await startSession($)
+
+  await clock.advance(POLL_MS)
+  expect(await drawHint($)).toEqual({ hint: ENGINE_HINT, tail: undefined })
+  world.usage = { ...world.usage, cost: { usd: 0.5 } }
+  await clock.advance(POLL_MS)
+  expect((await drawHint($))?.tail).toBe(' · $0.50')
+})
+
+test('the status line carries the running jobs and not the usage figures', async ($, on) => {
+  const files = new Map([['build.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS }]])
+  const { world, clock } = fakeWorld(on, files)
+  world.usage = HIGH_USAGE
+  await startSession($)
+
+  await clock.advance(POLL_MS)
+  expect(world.statuses).toEqual(['build 50%'])
+})
+
+test('a usage reading that fails is logged once and leaves the jobs polling', async ($, on) => {
+  const files = new Map([['build.sh-10.txt', { text: runningLine(1, 2), mtimeMs: START_MS }]])
+  const { world, clock } = fakeWorld(on, files)
+  world.isPanesFailing = true
+  await startSession($)
+
+  await clock.advance(POLL_MS * 3)
+  expect(world.statuses).toEqual(['build 50%'])
+  expect(world.logs).toHaveLength(1)
+  expect(world.logs[0]).toMatch(/^shell-progress: cannot read usage: /)
 })
 
 const agent = (id: string, description: string, status: AgentStatus = 'running'): AgentInfo => ({
@@ -234,6 +399,56 @@ test('Agents lists the agents newest first with their status, and drops one the 
   await clock.advance(POLL_MS)
   expect(await ui.find({ type: 'Button', text: 'review migrations' })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /^failed$/ }))?.props['color']).toBe('error')
+  await ui.unmount()
+})
+
+test("a finished agent's row shows its time and tokens, whichever loop started it", async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  world.agents = [agent('a1', 'review migrations', 'completed'), agent('a2', 'find callers', 'completed')]
+  const records = new Map([
+    ['review migrations', completedAgentRecord('a1', 40_000, 65_200)],
+    ['find callers', completedAgentRecord('a2', 75_000, 9_800)],
+  ])
+  on('tool.call', { tool: 'Agent' }, (_, e) => ({ result: records.get(e.description) }))
+  await startSession($)
+
+  const call = { tool: 'Agent', prompt: 'look', subagent_type: 'Explore' } as const
+  const answered = await $.tool.call({ ...call, description: 'review migrations' })
+  expect(answered).toMatchObject({ result: { agentId: 'a1', totalTokens: 65_200 } })
+  await $.tool.call({ ...call, description: 'find callers', agentId: 'a1' })
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: '0m 40s · 65k tokens' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '1m 15s · 10k tokens' })).toBeDefined()
+  await ui.unmount()
+})
+
+test("a background agent's launch and a failed agent call record no cost", async ($, on) => {
+  const { world, clock } = fakeWorld(on, new Map())
+  world.agents = [agent('a1', 'review migrations'), agent('a2', 'find callers')]
+  on('tool.call', { tool: 'Agent' }, (_, e) =>
+    e.description === 'review migrations'
+      ? {
+          result: {
+            status: 'async_launched',
+            agentId: 'a1',
+            description: e.description,
+            prompt: e.prompt,
+            outputFile: '/tmp/a1.txt',
+          },
+        }
+      : { result: completedAgentRecord('a2', 40_000, 65_200), isError: true, text: 'agent failed' },
+  )
+  await startSession($)
+
+  const call = { tool: 'Agent', prompt: 'look', subagent_type: 'Explore' } as const
+  await $.tool.call({ ...call, description: 'review migrations' })
+  await $.tool.call({ ...call, description: 'find callers' })
+  await clock.advance(POLL_MS)
+
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: /tokens$/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -305,4 +520,18 @@ test('a failing agent list is logged once and the last list stays drawn', async 
   const ui = await mountPane($)
   expect(await ui.find({ type: 'Button', text: 'review migrations' })).toBeDefined()
   await ui.unmount()
+})
+
+test("an agent's result passes through when its cost cannot be stored", async ($, on) => {
+  const { world } = fakeWorld(on, new Map())
+  on('tool.call', { tool: 'Agent' }, () => ({ result: completedAgentRecord('a1', 40_000, 65_200) }))
+  on('state.set', (_, e, next) => {
+    if (e.key === 'agentCosts') return { deny: 'the state is read-only' }
+    return next(e)
+  })
+  await startSession($)
+
+  const call = { tool: 'Agent', prompt: 'look', subagent_type: 'Explore', description: 'review' } as const
+  expect(await $.tool.call(call)).toMatchObject({ result: { agentId: 'a1', totalTokens: 65_200 } })
+  expect(world.logs).toContain("shell-progress: cannot record an agent's cost: shell-progress: $.state.set: the state is read-only")
 })

@@ -32,9 +32,12 @@ negative code, such as -1073741819 for an access violation.
 
 The file is `<progress dir>/<script file name>-<pid>.txt`, and the script file
 name keeps its extension, for example `build.sh-1234.txt`. Two runs of the same
-script therefore write two files. The start time is captured once, when the
-helper is loaded, and every later write reuses it. Files are written to a
-temporary name and renamed into place, so a reader never sees half a line.
+script therefore write two files. The pid is the one Windows tools show: under
+Git Bash and Cygwin the Bash helper reads it from `/proc/$$/winpid`, because
+`$$` there is the emulation layer's own number, and elsewhere it uses `$$`.
+The start time is captured once, when the helper is loaded, and every later
+write reuses it. Files are written to a temporary name and renamed into place,
+so a reader never sees half a line.
 
 ## Bash
 
@@ -144,15 +147,56 @@ task and whether it is running, waiting, completed or failed. Past five, the
 rest are counted. Pressing an agent's task shows its transcript in the main
 view, as the tasks list does; a toast says why when it cannot, for example
 for a teammate that runs in a terminal pane of its own. An agent leaves the
-list when Claude Code stops tracking it, shortly after it ends.
+list when Claude Code stops tracking it, shortly after it ends. Once an agent
+that Claude waited on has finished, a dim row under it gives its time and
+tokens, such as `0m 40s · 65k tokens`, from the Agent tool's result. An agent
+started in the background has no such row: the tool answers when it starts,
+before it has used either.
 
 At the foot of the pane, a bar shows how full the context window is, such as
-`38% · 76k of 200k`, and another how much of the five-hour usage limit is
-used and when it resets, such as `63% · resets 16:00`. Either bar takes the
-theme's warning colour from 80%. Below them is the session's cost so far, as
-`/cost` totals it. A figure Claude Code does not have is left out: the context
-bar appears after the session's first response, and the limit bar only on a
-subscription.
+`38% · 76k of 200k`, and another how much of the five-hour usage limit is used
+and when it resets, such as `63% · resets 16:00`. Each bar shares a row with
+its label and figures; in a pane narrower than 40 columns it takes a row of
+its own under them. Either bar takes the theme's warning colour from 80%.
+Below them is the session's cost so far, as `/cost` totals it. A figure Claude
+Code does not have is left out: the context bar appears after the session's
+first response, and the limit bar only on a subscription.
+
+Once a turn has ended, the context figures end with what it added to the
+context, such as `+12k`, or `-61k` for a turn that compacted it. A turn that
+added under 500 tokens shows nothing. The mod also reads the five-hour limit
+at the end of each turn. When the rate between the newest reading and one at
+least 5 minutes older says the limit fills before it resets, its figures give
+that time in the warning colour instead of the reset, such as
+`82% · full by 14:39`.
+
+While a job is running, a machine row above the bars gives the CPU,
+GPU and free memory, such as `cpu 34% · gpu 5% · 11.2 GB free`, as Task
+Manager counts them: the CPU against its base speed and capped at 100%, the
+GPU as its busiest adapter's 3D engines, and memory in gibibytes, which
+Windows calls GB. A machine without GPU Engine counters has no GPU figure.
+Under the readings, in the warning colour, `held at 78% speed` says a CPU at
+50% or more is running below its base speed, as heat or a power plan holds it
+back, and `on battery, 41%` says the laptop is off mains.
+
+The readings come from `mod/hooks/sampler.ps1`, one Windows PowerShell process
+that reads Windows performance counters, every process's among them, every 5
+seconds. The mod starts it with the first running job and stops it after the
+last; a file that does not hold a progress line does not count, and a stalled
+job does until it is dismissed. A reading older than 15 seconds is not shown.
+When the sampler cannot start, as on a machine without Windows PowerShell, or
+exits, writes a line the mod cannot read or writes nothing for 30 seconds, the
+mod logs why, once for a lasting fault, leaves the row out, and starts it
+again at most once a minute while a job runs.
+
+While the pane is closed, waiting for a wider terminal, or behind another
+pane, the same figures follow Claude Code's prompt hint, the line with the
+permission mode, drawn dim: `ctx 38% · 5h 63% · $1.84`. They leave the hint
+when the pane comes back into view, so each figure is on screen once. The mod
+adds them after the hint rather than rewriting it, so the permission mode
+keeps its colour and the agent count stays live. Only the terminal draws
+them, and a row too narrow for the whole hint cuts them short. They stay off
+the mod's status line, which Claude Code draws in its warning colour.
 
 Under Jobs, the pane lists each running job with a bar, its step and total, its label and
 the time since it started. From its third step a job also shows about how long
@@ -164,6 +208,32 @@ which is how a script that was killed before it could write its finished line
 shows. Under a Finished heading come the five newest jobs that ended during the
 session, with how long each took and, for a failure, its exit code. A file
 that does not hold a progress line shows as `unreadable progress line`.
+
+While the sampler runs, a running job's first row also gives the CPU its
+processes used between the last two readings, such as `cpu 12% · 7/12  58%`:
+the process whose id names the job's file and every process descended from
+it, as CPU time over elapsed time on all logical processors. A
+single-threaded job at full speed on 8 of them reads about 12%. The machine
+row measures against the base clock speed, so while the CPU runs faster than
+that, its figure is above the sum of the jobs'. A pane under 40 columns
+leaves the job's figure out. A stalled job whose process has ended, or whose
+id now names a process started after the job, reads `process ended`, at any
+width. A process that outlives the parent that started it, as a detached
+daemon does, is not counted.
+
+A job whose file has gone unchanged for the stall time while its processes
+use 5% or more of all logical processors is quiet, not stalled: its row reads
+`quiet 11m 00s · busy`, with how long since its file last changed, and the
+heading and status line count it as running. Once its processes fall below
+5%, or the sampler stops, it is stalled.
+
+A job whose process is killed outright keeps its spinner and running time
+until the stall time passes, since its file alone cannot say it has gone; it
+then reads stalled and `process ended`. The pid in a file is taken to be a
+Windows process id, so a job whose helper ran under WSL or on another machine
+and wrote into the same directory is matched against whatever Windows process
+has that id. Its CPU is then that process's, and it may read quiet and busy
+after it has ended.
 
 Pressing a job's name expands its row to the path of its progress file, its
 process id, the time it started and, once finished, its exit code. Pressing it
@@ -184,7 +254,8 @@ session, unless the prompt was refused, in which case it returns.
 
 The pane opens by itself when a session starts, if the terminal is at least
 144 columns wide. It does not open by itself again in that session once
-closed. `/progress` opens it at any width. While a job runs,
+closed. `/progress` opens it at any width. Docked beside the transcript it
+opens 48 columns wide, or at the width you last dragged it to. While a job runs,
 the status line under the prompt also names up to two jobs with their
 percentages, such as `build 58% · sync running · 1 more`.
 
@@ -255,4 +326,11 @@ start `claude --plugin-dir mod` once after cloning. Then:
 
 ```
 npx -y -p typescript@5.8.3 tsc -p mod
+```
+
+The sampler has a CPU budget of 600 ms a minute, 1% of one core. On Windows,
+this runs it for a minute after its start-up and exits 1 when it uses more:
+
+```
+python tests/measure_sampler.py
 ```

@@ -1,4 +1,4 @@
-import type { Job, ProgressLine } from '../types'
+import type { Job, ProcessState, ProgressLine } from '../types'
 
 export type RunningLine = ProgressLine & { kind: 'running' }
 type FinishedLine = ProgressLine & { kind: 'finished' }
@@ -63,11 +63,20 @@ function numericFields(match: RegExpExecArray): readonly [number, number, number
 }
 
 /**
- * Whether a running job's file has gone unchanged for `stallMs` at `nowMs`,
- * which is how a killed script shows. A finished or unreadable job never stalls.
+ * How a job stands against the stall time at `nowMs`. A running job whose
+ * file has gone unchanged for `stallMs` is `quiet` while its processes, by
+ * job file in `processStates`, are busy, and otherwise `stalled`, which is how
+ * a killed or hung script shows. Any other job is `active`: a running one
+ * whose file changed in time, and every finished or unreadable one.
  */
-export function isStalled(job: Job, nowMs: number, stallMs: number): boolean {
-  return job.line?.kind === 'running' && nowMs - job.mtimeMs >= stallMs
+export function stallState(
+  job: Job,
+  nowMs: number,
+  stallMs: number,
+  processStates: ReadonlyMap<string, ProcessState>,
+): 'active' | 'quiet' | 'stalled' {
+  if (job.line?.kind !== 'running' || nowMs - job.mtimeMs < stallMs) return 'active'
+  return processStates.get(job.file)?.kind === 'busy' ? 'quiet' : 'stalled'
 }
 
 /**
@@ -78,11 +87,14 @@ export function statusSummary(
   jobs: readonly Job[],
   nowMs: number,
   stallMs: number,
+  processStates: ReadonlyMap<string, ProcessState>,
 ): string | undefined {
   const parts: string[] = []
   for (const job of jobs) {
     if (job.line?.kind !== 'running') continue
-    parts.push(`${shortName(job.script)} ${runningState(job, job.line, nowMs, stallMs)}`)
+    const isStalled = stallState(job, nowMs, stallMs, processStates) === 'stalled'
+    const state = isStalled ? 'stalled' : progressText(job.line)
+    parts.push(`${shortName(job.script)} ${state}`)
   }
   if (parts.length === 0) return undefined
 
@@ -91,13 +103,7 @@ export function statusSummary(
   return [...named, ...(hidden > 0 ? [`${hidden} more`] : [])].join(' · ')
 }
 
-function runningState(
-  job: Job,
-  line: RunningLine,
-  nowMs: number,
-  stallMs: number,
-): string {
-  if (isStalled(job, nowMs, stallMs)) return 'stalled'
+function progressText(line: RunningLine): string {
   if (line.total === 0) return 'running'
   return `${Math.round((line.step / line.total) * 100)}%`
 }
@@ -239,6 +245,14 @@ export function runKey(job: Job): string | undefined {
 export function isDismissed(job: Job, dismissed: ReadonlySet<string>): boolean {
   const key = runKey(job)
   return key !== undefined && dismissed.has(key)
+}
+
+/**
+ * Whether a job not dismissed has a running line, which is what the machine
+ * is sampled and shown for. An unreadable file has no process to measure.
+ */
+export function hasRunningJob(jobs: readonly Job[], dismissed: ReadonlySet<string>): boolean {
+  return jobs.some(job => job.line?.kind === 'running' && !isDismissed(job, dismissed))
 }
 
 /**

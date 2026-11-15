@@ -1,0 +1,346 @@
+import { expect, test } from 'claude-code/testing'
+import type { Engine, MockClock } from 'claude-code/testing'
+import type { On } from 'claude-code'
+
+import type { FakeFile } from './fake-world'
+import { PANE, POLL_MS, STARTED_SEC, START_MS, fakeWorld, mountPane, runningLine, startSession } from './fake-world'
+
+const GB = 1024 ** 3
+const RESTART_MS = 60_000
+const JOB = 'build.sh-1.txt'
+
+const sampleLine = (changes: Record<string, unknown> = {}) =>
+  `${JSON.stringify({
+    cpuPercent: 34.2,
+    cpuSpeedPercent: 160,
+    gpuPercent: 5.3,
+    freeMemoryBytes: 11.2 * GB,
+    power: 'mains',
+    batteryPercent: null,
+    sampledMs: START_MS,
+    cpuCount: 8,
+    processes: [],
+    ...changes,
+  })}\r\n`
+
+function withRunningJob(on: On) {
+  const files = new Map<string, FakeFile>([[JOB, { text: runningLine(1, 4, 'compiling'), mtimeMs: START_MS }]])
+  const { world, clock } = fakeWorld(on, files)
+  return { files, world, clock, sampler: world.sampler }
+}
+
+function finishJob(files: Map<string, FakeFile>) {
+  files.set(JOB, { text: `${STARTED_SEC} done 0 ${STARTED_SEC + 9}\n`, mtimeMs: START_MS + POLL_MS })
+}
+
+async function machineTexts($: Engine) {
+  const ui = await mountPane($)
+  const readings = (await ui.find({ type: 'Text', text: /^cpu / }))?.text
+  const warning = await ui.find({ type: 'Text', text: /held at|on battery/ })
+  await ui.unmount()
+  return { readings, warning: warning?.text, warningColour: warning?.props['color'] }
+}
+
+async function poll(clock: MockClock) {
+  await clock.advance(POLL_MS)
+}
+
+test('the sampler starts with the first unfinished job and stops after the last', async ($, on) => {
+  const { files, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+
+  expect(sampler.runningCount).toBe(1)
+  expect(sampler.argvs[0]?.slice(0, 2)).toEqual(['powershell.exe', '-NoProfile'])
+  expect(sampler.argvs[0]?.at(-1)).toMatch(/[\\/]hooks\/sampler\.ps1$/)
+
+  await poll(clock)
+  expect(sampler.argvs).toHaveLength(1)
+
+  finishJob(files)
+  await poll(clock)
+  expect(sampler.runningCount).toBe(0)
+})
+
+test('a job that starts after the sampler stopped starts it again at once', async ($, on) => {
+  const { files, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  finishJob(files)
+  await poll(clock)
+
+  files.set('test.sh-2.txt', { text: runningLine(1, 3), mtimeMs: START_MS + 2 * POLL_MS })
+  await poll(clock)
+  expect(sampler.argvs).toHaveLength(2)
+  expect(sampler.runningCount).toBe(1)
+})
+
+test('the machine row shows the readings while a job runs', async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write(sampleLine())
+  await clock.settle()
+
+  expect(await machineTexts($)).toEqual({
+    readings: 'cpu 34% · gpu 5% · 11.2 GB free',
+    warning: undefined,
+    warningColour: undefined,
+  })
+  const ui = await mountPane($)
+  expect((await ui.find({ type: 'Text', text: 'machine' }))?.text).toBe('machine')
+  await ui.unmount()
+})
+
+test('the machine row warns of a held-back CPU only while it is busy', async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+
+  sampler.write(sampleLine({ cpuPercent: 20, cpuSpeedPercent: 60 }))
+  await clock.settle()
+  expect((await machineTexts($)).warning).toBeUndefined()
+
+  sampler.write(sampleLine({ cpuPercent: 85, cpuSpeedPercent: 78 }))
+  await clock.settle()
+  expect(await machineTexts($)).toMatchObject({ warning: 'held at 78% speed', warningColour: 'warning' })
+})
+
+test('the machine row warns when the machine is on battery', async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write(sampleLine({ power: 'battery', batteryPercent: 41 }))
+  await clock.settle()
+
+  expect(await machineTexts($)).toMatchObject({ warning: 'on battery, 41%', warningColour: 'warning' })
+})
+
+test('a narrow pane draws the machine label and readings', async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write(sampleLine())
+  await clock.settle()
+
+  const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 30 }, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /^cpu / }))?.text).toBe('cpu 34% · gpu 5% · 11.2 GB free')
+  expect((await ui.find({ type: 'Text', text: 'machine' }))?.text).toBe('machine')
+  await ui.unmount()
+})
+
+test('the machine row goes once a reading is 15 s old', async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write(sampleLine())
+  await clock.settle()
+
+  await clock.advance(15_000 + POLL_MS)
+  expect((await machineTexts($)).readings).toBeUndefined()
+})
+
+test('the machine row goes when the last job finishes', async ($, on) => {
+  const { files, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write(sampleLine())
+  await clock.settle()
+
+  finishJob(files)
+  await poll(clock)
+  expect((await machineTexts($)).readings).toBeUndefined()
+})
+
+test('a sampler that cannot start is logged once and tried again after a minute', async ($, on) => {
+  const { world, clock, sampler } = withRunningJob(on)
+  sampler.isMissing = true
+  await startSession($)
+  await poll(clock)
+
+  await clock.advance(RESTART_MS - 2 * POLL_MS)
+  expect(sampler.argvs).toHaveLength(1)
+  await clock.advance(2 * POLL_MS)
+  expect(sampler.argvs).toHaveLength(2)
+
+  const logged = world.logs.filter(line => line.includes('cannot sample the machine'))
+  expect(logged).toEqual(['shell-progress: cannot sample the machine: shell-progress: $.process.spawn: powershell.exe: not found'])
+  expect((await machineTexts($)).readings).toBeUndefined()
+})
+
+test('a sampler that writes a bad line is logged, stopped and started again after a minute', async ($, on) => {
+  const { world, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write('not json\n')
+  await clock.settle()
+
+  expect(sampler.runningCount).toBe(0)
+  expect(world.logs).toContain('shell-progress: cannot sample the machine: expected a JSON sampler line, got not json')
+  await clock.advance(RESTART_MS)
+  expect(sampler.runningCount).toBe(1)
+})
+
+test('a sampler that exits is logged with what it wrote to stderr', async ($, on) => {
+  const { world, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write('Exception calling "NextValue"\r\n', 'stderr')
+  sampler.end(1)
+  await clock.settle()
+
+  expect(world.logs).toContain(
+    'shell-progress: cannot sample the machine: the sampler exited with code 1: Exception calling "NextValue"',
+  )
+})
+
+// The job's process, pid 1 from its file name, started a minute before its helper loaded.
+const JOB_PROCESS_STARTED_MS = START_MS - 60_000
+
+/** Two readings 5 s apart, between which the job's process used `cpuMs`, or none when it is gone. */
+async function readJobCpu(clock: MockClock, sampler: { write: (text: string) => void }, cpuMs: number | null) {
+  const nowMs = clock.now()
+  sampler.write(sampleLine({ sampledMs: nowMs, processes: [[1, 0, 0, JOB_PROCESS_STARTED_MS]] }))
+  await clock.settle()
+  const processes = cpuMs === null ? [] : [[1, 0, cpuMs, JOB_PROCESS_STARTED_MS]]
+  sampler.write(sampleLine({ sampledMs: nowMs + 5_000, processes }))
+  await clock.settle()
+}
+
+/** Advances the clock by `ms` while the sampler writes a reading every 5 s, as a working one does. */
+async function advanceSampling(clock: MockClock, sampler: { write: (text: string) => void }, ms: number) {
+  for (let advancedMs = 0; advancedMs < ms; advancedMs += 5_000) {
+    sampler.write(sampleLine({ sampledMs: clock.now() }))
+    await clock.advance(5_000)
+  }
+}
+
+async function stepTextIn($: Engine, bodyColumns: number) {
+  const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
+  const text = (await ui.find({ type: 'Text', text: /1\/4/ }))?.text
+  await ui.unmount()
+  return text
+}
+
+test("a running job gives its processes' CPU before its step", async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  // 4000 ms of CPU over 5000 ms on 8 cores.
+  await readJobCpu(clock, sampler, 4_000)
+
+  expect(await stepTextIn($, 40)).toBe('cpu 10% · 1/4   25%')
+})
+
+test("a pane under 40 columns leaves out a running job's CPU", async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  await readJobCpu(clock, sampler, 4_000)
+
+  expect(await stepTextIn($, 39)).toBe('1/4   25%')
+})
+
+test('a running job shows no CPU from a single reading', async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write(sampleLine({ processes: [[1, 0, 0, JOB_PROCESS_STARTED_MS]] }))
+  await clock.settle()
+
+  expect(await stepTextIn($, 40)).toBe('1/4   25%')
+})
+
+test('a stalled job whose process has gone says so, even in a narrow pane', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await advanceSampling(clock, sampler, 60_000)
+  await readJobCpu(clock, sampler, null)
+
+  expect(await stepTextIn($, 30)).toBe('process ended · 1/4   25%')
+})
+
+test('a job still writing its file shows no CPU once its pid is gone', async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  await readJobCpu(clock, sampler, null)
+
+  expect(await stepTextIn($, 40)).toBe('1/4   25%')
+})
+
+test('a quiet job whose processes are busy is not stalled', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const { world, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await advanceSampling(clock, sampler, 60_000)
+  // 4000 ms of CPU over 5000 ms on 8 cores: busy from 5%.
+  await readJobCpu(clock, sampler, 4_000)
+  await poll(clock)
+
+  const ui = await mountPane($)
+  const quiet = await ui.find({ type: 'Text', text: /^quiet/ })
+  expect(quiet?.text).toBe('quiet 1m 00s · busy')
+  expect(quiet?.props['dimColor']).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^stalled/ })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /running$/ }))?.text).toBe('1 running')
+  await ui.unmount()
+  expect(world.statuses.at(-1)).toBe('build 25%')
+})
+
+test('a quiet job whose processes are idle is stalled', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const { world, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await advanceSampling(clock, sampler, 60_000)
+  await readJobCpu(clock, sampler, 1_000)
+  await poll(clock)
+
+  expect(await stepTextIn($, 40)).toBe('cpu 3% · 1/4   25%')
+  const ui = await mountPane($)
+  expect((await ui.find({ type: 'Text', text: /^stalled/ }))?.text).toBe('stalled after 0m 00s')
+  await ui.unmount()
+  expect(world.statuses.at(-1)).toBe('build stalled')
+})
+
+test("a restarted sampler's first reading gives no CPU against the last run's", async ($, on) => {
+  const { files, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  await readJobCpu(clock, sampler, 4_000)
+  finishJob(files)
+  await poll(clock)
+  files.set('deploy.sh-1.txt', { text: runningLine(1, 4, 'uploading'), mtimeMs: clock.now() })
+  await poll(clock)
+  expect(sampler.runningCount).toBe(1)
+
+  // 6 s after the last run's second reading, within the 15 s a pair may span.
+  sampler.write(sampleLine({ sampledMs: clock.now() + 10_000, processes: [[1, 0, 9_000, JOB_PROCESS_STARTED_MS]] }))
+  await clock.settle()
+  expect(await stepTextIn($, 40)).toBe('1/4   25%')
+})
+
+test('a sampler that writes nothing for 30 s is logged, stopped and started again after a minute', async ($, on) => {
+  const { world, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write(sampleLine())
+  await clock.settle()
+
+  await clock.advance(30_000)
+  expect(sampler.runningCount).toBe(1)
+  await poll(clock)
+  expect(sampler.runningCount).toBe(0)
+  expect(world.logs).toContain('shell-progress: cannot sample the machine: the sampler wrote nothing for 30s')
+  await clock.advance(RESTART_MS - 30_000 - 2 * POLL_MS)
+  expect(sampler.runningCount).toBe(0)
+  await poll(clock)
+  expect(sampler.runningCount).toBe(1)
+})
+
+test('an unreadable progress file does not start the sampler', async ($, on) => {
+  const files = new Map<string, FakeFile>([['stray-1.txt', { text: 'not a progress line\n', mtimeMs: START_MS }]])
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+  await poll(clock)
+
+  expect(world.sampler.argvs).toHaveLength(0)
+})

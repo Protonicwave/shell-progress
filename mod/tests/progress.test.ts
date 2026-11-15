@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import type { Job, ProgressLine } from '../types'
+import type { Job, ProcessState, ProgressLine } from '../types'
 import {
   announcementText,
   askClaudeText,
@@ -9,18 +9,21 @@ import {
   durationText,
   finishedSince,
   finishedText,
-  isStalled,
   isWorthNotifying,
   parseProgressLine,
   remainingSeconds,
   remainingText,
   shownJobs,
+  stallState,
   statusSummary,
 } from '../hooks/progress'
 import type { FinishedJob, RunningLine } from '../hooks/progress'
 
 const STALL_MS = 10 * 60_000
 const NOW_MS = 1_700_000_100_000
+const NO_PROCESS_STATES: ReadonlyMap<string, ProcessState> = new Map()
+const BUSY: ProcessState = { kind: 'busy', cpuPercent: 12 }
+const IDLE: ProcessState = { kind: 'idle', cpuPercent: 1 }
 
 const running = (
   step: number,
@@ -110,39 +113,52 @@ describe('parseProgressLine', () => {
   }
 })
 
-describe('isStalled', () => {
-  test('a running job is not stalled just before the threshold', () => {
-    const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS + 1)
-    expect(isStalled(quiet, NOW_MS, STALL_MS)).toBe(false)
+describe('stallState', () => {
+  const quietFile = () => job('build.sh', running(1, 3), NOW_MS - STALL_MS)
+
+  test('a running job is active just before the threshold', () => {
+    const recent = job('build.sh', running(1, 3), NOW_MS - STALL_MS + 1)
+    expect(stallState(recent, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('active')
+    expect(stallState(recent, NOW_MS, STALL_MS, new Map([[recent.file, BUSY]]))).toBe('active')
   })
 
   test('a running job is stalled once its file is unchanged for the threshold', () => {
-    const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS)
-    expect(isStalled(quiet, NOW_MS, STALL_MS)).toBe(true)
+    expect(stallState(quietFile(), NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('stalled')
   })
 
   test('a job with no step count stalls too', () => {
     const quiet = job('sync.sh', running(0, 0), NOW_MS - STALL_MS)
-    expect(isStalled(quiet, NOW_MS, STALL_MS)).toBe(true)
+    expect(stallState(quiet, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('stalled')
   })
 
-  test('a finished job never stalls, however old', () => {
+  test('a finished job is active however old', () => {
     const line = parseProgressLine('1700000000 done -1 1700000060')
-    expect(isStalled(job('migrate.sh', line, 0), NOW_MS, STALL_MS)).toBe(false)
+    expect(stallState(job('migrate.sh', line, 0), NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('active')
   })
 
-  test('an unreadable job never stalls', () => {
-    expect(isStalled(job('odd.sh', null, 0), NOW_MS, STALL_MS)).toBe(false)
+  test('an unreadable job is active however old', () => {
+    expect(stallState(job('odd.sh', null, 0), NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('active')
+  })
+
+  test('a job whose file is unchanged while its processes are busy is quiet', () => {
+    const quiet = quietFile()
+    expect(stallState(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, BUSY]]))).toBe('quiet')
+  })
+
+  test('a job whose file is unchanged while its processes are idle or ended is stalled', () => {
+    const quiet = quietFile()
+    expect(stallState(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, IDLE]]))).toBe('stalled')
+    expect(stallState(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, { kind: 'ended' }]]))).toBe('stalled')
   })
 })
 
 describe('statusSummary', () => {
   test('is undefined with no jobs', () => {
-    expect(statusSummary([], NOW_MS, STALL_MS)).toBeUndefined()
+    expect(statusSummary([], NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBeUndefined()
   })
 
   test('names one running job and its percentage', () => {
-    expect(statusSummary([job('build.sh', running(7, 12))], NOW_MS, STALL_MS)).toBe(
+    expect(statusSummary([job('build.sh', running(7, 12))], NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe(
       'build 58%',
     )
   })
@@ -153,7 +169,7 @@ describe('statusSummary', () => {
       job('test-suite.ps1', running(12, 48)),
       job('sync-fixtures.sh', running(0, 0)),
     ]
-    expect(statusSummary(jobs, NOW_MS, STALL_MS)).toBe('build 58% · test-suite 25% · 1 more')
+    expect(statusSummary(jobs, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('build 58% · test-suite 25% · 1 more')
   })
 
   test('says running for a job with no step count and stalled for a quiet one', () => {
@@ -161,7 +177,12 @@ describe('statusSummary', () => {
       job('sync.sh', running(0, 0)),
       job('build.sh', running(1, 3), NOW_MS - STALL_MS),
     ]
-    expect(statusSummary(jobs, NOW_MS, STALL_MS)).toBe('sync running · build stalled')
+    expect(statusSummary(jobs, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('sync running · build stalled')
+  })
+
+  test('gives a quiet job whose processes are busy its percentage, not stalled', () => {
+    const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS)
+    expect(statusSummary([quiet], NOW_MS, STALL_MS, new Map([[quiet.file, BUSY]]))).toBe('build 33%')
   })
 
   test('leaves out finished and unreadable jobs', () => {
@@ -171,12 +192,12 @@ describe('statusSummary', () => {
       job('odd.sh', null),
       job('build.sh', running(1, 4)),
     ]
-    expect(statusSummary(jobs, NOW_MS, STALL_MS)).toBe('build 25%')
+    expect(statusSummary(jobs, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('build 25%')
   })
 
   test('is undefined once every job has finished', () => {
     const jobs = [job('lint.sh', parseProgressLine('1700000000 done 0 1700000060'))]
-    expect(statusSummary(jobs, NOW_MS, STALL_MS)).toBeUndefined()
+    expect(statusSummary(jobs, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBeUndefined()
   })
 })
 
