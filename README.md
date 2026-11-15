@@ -35,9 +35,9 @@ name keeps its extension, for example `build.sh-1234.txt`. Two runs of the same
 script therefore write two files. The pid is the one Windows tools show: under
 Git Bash and Cygwin the Bash helper reads it from `/proc/$$/winpid`, because
 `$$` there is the emulation layer's own number, and elsewhere it uses `$$`.
-The start time is captured once, when the
-helper is loaded, and every later write reuses it. Files are written to a
-temporary name and renamed into place, so a reader never sees half a line.
+The start time is captured once, when the helper is loaded, and every later
+write reuses it. Files are written to a temporary name and renamed into place,
+so a reader never sees half a line.
 
 ## Bash
 
@@ -226,6 +226,14 @@ use 5% or more of all logical processors is quiet, not stalled: its row reads
 `quiet 11m 00s · busy`, with how long since its file last changed, and the
 heading and status line count it as running. Once its processes fall below
 5%, or the sampler stops, it is stalled.
+
+A job whose process is killed outright keeps its spinner and running time
+until the stall time passes, since its file alone cannot say it has gone; it
+then reads stalled and `process ended`. The pid in a file is taken to be a
+Windows process id, so a job whose helper ran under WSL or on another machine
+and wrote into the same directory is matched against whatever Windows process
+has that id. Its CPU is then that process's, and it may read quiet and busy
+after it has ended.
 
 Pressing a job's name expands its row to the path of its progress file, its
 process id, the time it started and, once finished, its exit code. Pressing it
