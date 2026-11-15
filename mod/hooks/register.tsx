@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, ProcessSpawnResult, Register, Timer } from 'claude-code'
 
-import type { Job, ListedAgent, RunningCall, SessionTurn } from '../types'
+import type { Job, ListedAgent, ProcessState, RunningCall, SessionTurn } from '../types'
 import { parseSample, processStates, takeLines } from './machine'
 import type { FinishedJob } from './progress'
 import { PANE_COLUMNS, PANE_ID, PANE_TITLE, drawPane } from './pane'
@@ -471,7 +471,8 @@ async function pollOnce(
   const dismissed = new Set(await read($, dismissedJobs))
   const shown = current.filter(job => !isDismissed(job, dismissed))
   const nowMs = await $.clock.now()
-  const isAnyLive = shown.some(job => isLive(job, nowMs, stallMs))
+  const states = processStates(shown, await read($, machineReadings), nowMs)
+  const isAnyLive = shown.some(job => isLive(job, nowMs, stallMs, states))
   const finished = finishedSince(previous, shown)
   if (finished.length > 0) announceFinished($, finished, notifySeconds)
 
@@ -480,7 +481,7 @@ async function pollOnce(
   // row does not move, so it alone does not keep the pane redrawing.
   if (isAnyLive) $.ui.invalidate('ui.render')
   return {
-    status: statusSummary(shown, nowMs, stallMs),
+    status: statusSummary(shown, nowMs, stallMs, states),
     hasUnfinishedJob: shown.some(job => !isFinished(job)),
     atMs: nowMs,
   }
@@ -599,8 +600,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function isLive(job: Job, nowMs: number, stallMs: number): boolean {
-  return job.line?.kind === 'running' && !isStalled(job, nowMs, stallMs)
+function isLive(
+  job: Job,
+  nowMs: number,
+  stallMs: number,
+  states: ReadonlyMap<string, ProcessState>,
+): boolean {
+  return job.line?.kind === 'running' && !isStalled(job, nowMs, stallMs, states)
 }
 
 async function openPaneOnce($: EngineInterface): Promise<void> {

@@ -260,3 +260,35 @@ test('a job still writing its file shows no CPU once its pid is gone', async ($,
 
   expect(await stepTextIn($, 40)).toBe('1/4   25%')
 })
+
+test('a quiet job whose processes are busy is not stalled', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const { world, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await clock.advance(60_000)
+  // 4000 ms of CPU over 5000 ms on 8 cores: busy from 5%.
+  await readJobCpu(clock, sampler, 4_000)
+  await poll(clock)
+
+  const ui = await mountPane($)
+  const quiet = await ui.find({ type: 'Text', text: /^quiet/ })
+  expect(quiet?.text).toBe('quiet 1m 00s · busy')
+  expect(quiet?.props['dimColor']).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^stalled/ })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /running$/ }))?.text).toBe('1 running')
+  await ui.unmount()
+  expect(world.statuses.at(-1)).toBe('build 25%')
+})
+
+test('a quiet job whose processes are idle is stalled', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const { world, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await clock.advance(60_000)
+  await readJobCpu(clock, sampler, 1_000)
+  await poll(clock)
+
+  expect(await stepTextIn($, 40)).toBe('cpu 3% · 1/4   25%')
+  const ui = await mountPane($)
+  expect((await ui.find({ type: 'Text', text: /^stalled/ }))?.text).toBe('stalled after 0m 00s')
+  await ui.unmount()
+  expect(world.statuses.at(-1)).toBe('build stalled')
+})

@@ -220,6 +220,12 @@ id now names a process started after the job, reads `process ended`, at any
 width. A process that outlives the parent that started it, as a detached
 daemon does, is not counted.
 
+A job whose file has gone unchanged for the stall time while its processes
+use 5% or more of all logical processors is quiet, not stalled: its row reads
+`quiet 11m 00s · busy`, with how long since its file last changed, and the
+heading and status line count it as running. Once its processes fall below
+5%, or the sampler stops, it is stalled.
+
 Pressing a job's name expands its row to the path of its progress file, its
 process id, the time it started and, once finished, its exit code. Pressing it
 again, or another job's name, collapses it. An expanded stalled or finished

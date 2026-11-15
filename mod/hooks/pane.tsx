@@ -23,6 +23,7 @@ import {
   durationText,
   finishedText,
   isFinished,
+  isQuietButBusy,
   isStalled,
   remainingSeconds,
   remainingText,
@@ -359,7 +360,7 @@ function jobsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   )
   if (unfinished.length === 0 && finished.length === 0 && hiddenCount === 0) return undefined
   const runningCount = unfinished.filter(
-    job => job.line !== null && !isStalled(job, view.nowMs, view.stallMs),
+    job => job.line !== null && !isStalled(job, view.nowMs, view.stallMs, view.processStates),
   ).length
   const count = countText(runningCount, unfinished.length, finished.length)
 
@@ -370,7 +371,7 @@ function jobsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
         <Box key={job.file} flexDirection="column" marginTop={1}>
           {unfinishedRows(ui, view, job)}
           {job.file === view.expandedJob &&
-            jobDetails(ui, view, job, isStalled(job, view.nowMs, view.stallMs))}
+            jobDetails(ui, view, job, isStalled(job, view.nowMs, view.stallMs, view.processStates))}
         </Box>
       ))}
       {finished.length > 0 && (
@@ -429,16 +430,8 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
   }
 
   const line = job.line
-  const hasStalled = isStalled(job, view.nowMs, view.stallMs)
-  // A stalled row gives how long the job ran before its file went quiet, which
-  // stays put, so the pane need not be redrawn for it.
-  const time = hasStalled ? (
-    <Text color={STALLED_COLOUR}>
-      stalled after {durationText(job.mtimeMs / MS_PER_SECOND - line.startedSec)}
-    </Text>
-  ) : (
-    <Text dimColor>{runningTimeText(line, view.nowMs)}</Text>
-  )
+  const hasStalled = isStalled(job, view.nowMs, view.stallMs, view.processStates)
+  const time = jobTime(ui, view, job, line, hasStalled)
 
   const processPart = processText(view, job, hasStalled)
   if (line.total === 0) {
@@ -474,6 +467,26 @@ function processText(view: PaneView, job: Job, hasStalled: boolean): string {
   if (state.kind === 'ended') return hasStalled ? 'process ended · ' : ''
   if (view.bodyColumns < JOB_CPU_MIN_COLUMNS) return ''
   return `cpu ${Math.round(state.cpuPercent)}% · `
+}
+
+/**
+ * The end of a running job's last row. A stalled job gives how long it ran
+ * before its file went quiet, which stays put, so the pane need not be
+ * redrawn for it; a quiet job whose processes are busy, how long its file has
+ * been quiet; any other job, its running time.
+ */
+function jobTime({ Text }: PaneElements, view: PaneView, job: Job, line: RunningLine, hasStalled: boolean) {
+  if (hasStalled) {
+    return (
+      <Text color={STALLED_COLOUR}>
+        stalled after {durationText(job.mtimeMs / MS_PER_SECOND - line.startedSec)}
+      </Text>
+    )
+  }
+  if (isQuietButBusy(job, view.nowMs, view.stallMs, view.processStates)) {
+    return <Text>quiet {durationText((view.nowMs - job.mtimeMs) / MS_PER_SECOND)} · busy</Text>
+  }
+  return <Text dimColor>{runningTimeText(line, view.nowMs)}</Text>
 }
 
 /** `1m 12s`, and from the third step `1m 12s · about 25s left`. */
