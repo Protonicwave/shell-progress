@@ -170,7 +170,7 @@ least 5 minutes older says the limit fills before it resets, its figures give
 that time in the warning colour instead of the reset, such as
 `82% · full by 14:39`.
 
-While a job is still to finish, a machine row above the bars gives the CPU,
+While a job is running, a machine row above the bars gives the CPU,
 GPU and free memory, such as `cpu 34% · gpu 5% · 11.2 GB free`, as Task
 Manager counts them: the CPU against its base speed and capped at 100%, the
 GPU as its busiest adapter's 3D engines, and memory in gibibytes, which
@@ -181,11 +181,12 @@ back, and `on battery, 41%` says the laptop is off mains.
 
 The readings come from `mod/hooks/sampler.ps1`, one Windows PowerShell process
 that reads Windows performance counters, every process's among them, every 5
-seconds. The mod starts it
-with the first unfinished job and stops it after the last. A reading older
-than 15 seconds is not shown. When the sampler cannot start, as on a machine
-without Windows PowerShell, or exits, or writes a line the mod cannot read,
-the mod logs why, once for a lasting fault, leaves the row out, and starts it
+seconds. The mod starts it with the first running job and stops it after the
+last; a file that does not hold a progress line does not count, and a stalled
+job does until it is dismissed. A reading older than 15 seconds is not shown.
+When the sampler cannot start, as on a machine without Windows PowerShell, or
+exits, writes a line the mod cannot read or writes nothing for 30 seconds, the
+mod logs why, once for a lasting fault, leaves the row out, and starts it
 again at most once a minute while a job runs.
 
 While the pane is closed, waiting for a wider terminal, or behind another

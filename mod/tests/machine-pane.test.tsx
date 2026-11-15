@@ -335,3 +335,12 @@ test('a sampler that writes nothing for 30 s is logged, stopped and started agai
   await poll(clock)
   expect(sampler.runningCount).toBe(1)
 })
+
+test('an unreadable progress file does not start the sampler', async ($, on) => {
+  const files = new Map<string, FakeFile>([['stray-1.txt', { text: 'not a progress line\n', mtimeMs: START_MS }]])
+  const { world, clock } = fakeWorld(on, files)
+  await startSession($)
+  await poll(clock)
+
+  expect(world.sampler.argvs).toHaveLength(0)
+})

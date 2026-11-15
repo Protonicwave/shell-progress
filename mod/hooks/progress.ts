@@ -259,6 +259,14 @@ export function isDismissed(job: Job, dismissed: ReadonlySet<string>): boolean {
 }
 
 /**
+ * Whether a job not dismissed has a running line, which is what the machine
+ * is sampled and shown for. An unreadable file has no process to measure.
+ */
+export function hasRunningJob(jobs: readonly Job[], dismissed: ReadonlySet<string>): boolean {
+  return jobs.some(job => job.line?.kind === 'running' && !isDismissed(job, dismissed))
+}
+
+/**
  * Splits jobs for the pane. Running and unreadable jobs are unfinished, in the
  * order given. Of the finished, only those that ended in or after the
  * session's first second show, newest first, at most MAX_SHOWN_FINISHED_JOBS.

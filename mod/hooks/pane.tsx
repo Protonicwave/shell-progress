@@ -22,6 +22,7 @@ import {
   clockTimeText,
   durationText,
   finishedText,
+  hasRunningJob,
   isFinished,
   isQuietButBusy,
   isStalled,
@@ -272,15 +273,13 @@ function usageGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
 /**
  * The `machine` label and readings, lined up with the usage rows, and any
  * warnings on a row of their own so a narrow pane cuts the readings rather
- * than a warning. Nothing once the jobs are finished or the reading is old.
+ * than a warning. Nothing once no job is running or the reading is old.
  */
 function machineRows(ui: PaneElements, view: PaneView, isOneRow: boolean): RenderNode | undefined {
   const { Box, Text } = ui
   const sample = view.machineSample
   if (sample === null || !isCurrentSample(sample, view.nowMs)) return undefined
-  if (shownJobs(view.jobs, view.usage.startedAt, view.dismissedJobs).unfinished.length === 0) {
-    return undefined
-  }
+  if (!hasRunningJob(view.jobs, view.dismissedJobs)) return undefined
   const label = <Text dimColor>machine</Text>
   const readings = <Text dimColor wrap="truncate-end">{machineText(sample)}</Text>
   const warnings = machineWarnings(sample)

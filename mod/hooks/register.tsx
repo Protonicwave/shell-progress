@@ -13,8 +13,8 @@ import {
   askClaudeText,
   runKey,
   finishedSince,
+  hasRunningJob,
   isDismissed,
-  isFinished,
   isStalled,
   isWorthNotifying,
   statusSummary,
@@ -373,7 +373,7 @@ function startPolling(
   const tickJobs = unlessUnsettled($, `a poll of ${dir}`, () =>
     pollOnce($, dir, stallMs, notifySeconds).then(polled => {
       jobsFailure.clear()
-      sampleWhile(polled.hasUnfinishedJob, polled.atMs)
+      sampleWhile(polled.hasRunningJob, polled.atMs)
       if (polled.status === shownStatus) return
       shownStatus = polled.status
       $.ui.status(polled.status)
@@ -453,10 +453,10 @@ async function pollAgents($: EngineInterface): Promise<void> {
   if (merged !== previous) await update($, agents, () => merged)
 }
 
-/** What one poll of the jobs found: the status line, whether a job is still to finish, and when. */
+/** What one poll of the jobs found: the status line, whether a job is running, and when. */
 type JobsPoll = {
   readonly status: string | undefined
-  readonly hasUnfinishedJob: boolean
+  readonly hasRunningJob: boolean
   readonly atMs: number
 }
 
@@ -485,7 +485,7 @@ async function pollOnce(
   if (isAnyLive) $.ui.invalidate('ui.render')
   return {
     status: statusSummary(shown, nowMs, stallMs, states),
-    hasUnfinishedJob: shown.some(job => !isFinished(job)),
+    hasRunningJob: hasRunningJob(shown, dismissed),
     atMs: nowMs,
   }
 }
