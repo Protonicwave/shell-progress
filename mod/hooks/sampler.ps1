@@ -8,8 +8,9 @@
 #
 # The counters are opened once and read on each sample, because starting
 # PowerShell for each sample costs about 185 ms of CPU and these reads about
-# 30 ms. gpuPercent is null where Windows has no GPU Engine counters, and
-# batteryPercent is null on mains or when Windows does not know the charge.
+# 30 ms. gpuPercent is null where Windows has no GPU Engine counters,
+# processes is null where it has no Process V2 counters, and batteryPercent is
+# null on mains or when Windows does not know the charge.
 # Each process is [pid, parentPid, cpuMs, startedMs], with CPU time summed
 # over all cores and times in milliseconds since the Unix epoch.
 
@@ -35,7 +36,10 @@ $cpuPerformance = [Diagnostics.PerformanceCounter]::new('Processor Information',
 $availableMemory = [Diagnostics.PerformanceCounter]::new('Memory', 'Available Bytes')
 # Process V2 names each instance with its pid, so two processes of one name
 # never share an instance, as they can in the Process category.
-$processes = [Diagnostics.PerformanceCounterCategory]::new('Process V2')
+$processes = $null
+if ([Diagnostics.PerformanceCounterCategory]::Exists('Process V2')) {
+    $processes = [Diagnostics.PerformanceCounterCategory]::new('Process V2')
+}
 $gpuEngines = $null
 if ([Diagnostics.PerformanceCounterCategory]::Exists('GPU Engine')) {
     $gpuEngines = [Diagnostics.PerformanceCounterCategory]::new('GPU Engine')
@@ -70,6 +74,7 @@ function Get-GpuPercent($previous, $current) {
 # on the machine it was measured on. This process's start is known on both
 # clocks, so it converts every other start to the wall clock.
 function Get-StartOffsetTicks {
+    if ($null -eq $processes) { return $null }
     $self = [Diagnostics.Process]::GetCurrentProcess()
     $counters = $processes.ReadCategory()
     foreach ($instance in $counters['process id'].Keys) {
@@ -81,8 +86,9 @@ function Get-StartOffsetTicks {
 }
 
 # Every process but Idle as JSON arrays, joined by hand: ConvertTo-Json takes
-# several times as long over a few hundred of them.
+# several times as long over a few hundred of them. null without Process V2.
 function Get-ProcessesJson($startOffsetTicks) {
+    if ($null -eq $processes) { return 'null' }
     $counters = $processes.ReadCategory()
     $parents = $counters['creating process id']
     $cpuTimes = $counters['% processor time']

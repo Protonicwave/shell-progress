@@ -55,6 +55,10 @@ describe('parseSample', () => {
     })
   })
 
+  test('reads a process list of null as no Process V2 counters', () => {
+    expect(parseSample(lineWith({ processes: null }), AT_MS).processes).toBeNull()
+  })
+
   test('reads an empty process list', () => {
     expect(parseSample(lineWith({ processes: [] }), AT_MS).processes).toEqual([])
   })
@@ -320,12 +324,18 @@ describe('processStates', () => {
     expect(processStates(jobs, null, AFTER_MS).size).toBe(0)
   })
 
+  test('gives none where either reading has no process list', () => {
+    const unlisted = { ...after, processes: null }
+    expect(processStates(jobs, { previous: before, current: unlisted }, AFTER_MS).size).toBe(0)
+    expect(processStates(jobs, { previous: { ...before, processes: null }, current: after }, AFTER_MS).size).toBe(0)
+  })
+
   test('gives none once the last reading is 15 s old', () => {
     expect(processStates(jobs, { previous: before, current: after }, AFTER_MS + 15_001).size).toBe(0)
   })
 
   test('gives none across a gap of over 15 s between readings, or a clock that went back', () => {
-    const late = reading(BEFORE_MS + 15_001, after.processes)
+    const late = { ...after, atMs: BEFORE_MS + 15_001, sampledMs: BEFORE_MS + 15_001 }
     expect(processStates(jobs, { previous: before, current: late }, late.atMs).size).toBe(0)
     expect(processStates(jobs, { previous: after, current: before }, BEFORE_MS).size).toBe(0)
   })

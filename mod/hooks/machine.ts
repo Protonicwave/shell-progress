@@ -71,9 +71,10 @@ function cpuCountOf(fields: Readonly<Record<string, unknown>>): number {
   return count as number
 }
 
-/** Each process as `[pid, parentPid, cpuMs, startedMs]`, all whole numbers of zero or more. */
-function processesOf(fields: Readonly<Record<string, unknown>>): readonly ProcessReading[] {
+/** Each process as `[pid, parentPid, cpuMs, startedMs]`, all whole numbers of zero or more; `null` stays. */
+function processesOf(fields: Readonly<Record<string, unknown>>): readonly ProcessReading[] | null {
   const listed: unknown = fields['processes']
+  if (listed === null) return null
   if (!Array.isArray(listed)) {
     throw new Error(`expected the sampler's processes to be a list, got ${excerpt(JSON.stringify(listed) ?? 'nothing')}`)
   }
@@ -152,11 +153,19 @@ export function machineWarnings(sample: MachineSample): readonly string[] {
   return warnings
 }
 
+/** A reading that lists the machine's processes. */
+type ListedSample = MachineSample & { readonly processes: readonly ProcessReading[] }
+
+function hasProcessList(sample: MachineSample): sample is ListedSample {
+  return sample.processes !== null
+}
+
 /**
  * The state of each running job's process tree between the last two
  * readings, by job file. Empty before a sampler's second reading, once the
- * last is no longer current, and when the readings are not in order or are
- * further apart than a current reading may be old.
+ * last is no longer current, when either lists no processes, and when the
+ * readings are not in order or are further apart than a current reading may
+ * be old.
  */
 export function processStates(
   jobs: readonly Job[],
@@ -168,6 +177,7 @@ export function processStates(
     return states
   }
   const { previous, current } = readings
+  if (!hasProcessList(previous) || !hasProcessList(current)) return states
   const intervalMs = current.sampledMs - previous.sampledMs
   if (intervalMs <= 0 || intervalMs > MAX_SAMPLE_AGE_MS) return states
   for (const job of jobs) {
@@ -185,8 +195,8 @@ export function processStates(
 function stateOfProcess(
   pid: string,
   startedSec: number,
-  previous: MachineSample,
-  current: MachineSample,
+  previous: ListedSample,
+  current: ListedSample,
 ): ProcessState {
   const rootPid = Number(pid)
   const root = current.processes.find(process => process.pid === rootPid)
@@ -203,7 +213,7 @@ function stateOfProcess(
  * that ended between the readings is left out. `current` must be read after
  * `previous`.
  */
-function treeCpu(previous: MachineSample, current: MachineSample, rootPid: number): number {
+function treeCpu(previous: ListedSample, current: ListedSample, rootPid: number): number {
   const before = new Map(previous.processes.map(process => [process.pid, process]))
   let cpuMs = 0
   for (const process of processTree(current.processes, rootPid)) {

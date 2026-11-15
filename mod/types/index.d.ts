@@ -123,7 +123,8 @@ export type MachineSample = {
   readonly sampledMs: number
   /** Logical processors, which a share of all cores is taken against. */
   readonly cpuCount: number
-  readonly processes: readonly ProcessReading[]
+  /** `null` where Windows has no Process V2 counters. */
+  readonly processes: readonly ProcessReading[] | null
 }
 
 /** One process in a sampler reading. */
