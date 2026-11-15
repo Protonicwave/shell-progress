@@ -207,6 +207,14 @@ async function readJobCpu(clock: MockClock, sampler: { write: (text: string) => 
   await clock.settle()
 }
 
+/** Advances the clock by `ms` while the sampler writes a reading every 5 s, as a working one does. */
+async function advanceSampling(clock: MockClock, sampler: { write: (text: string) => void }, ms: number) {
+  for (let advancedMs = 0; advancedMs < ms; advancedMs += 5_000) {
+    sampler.write(sampleLine({ sampledMs: clock.now() }))
+    await clock.advance(5_000)
+  }
+}
+
 async function stepTextIn($: Engine, bodyColumns: number) {
   const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
   const text = (await ui.find({ type: 'Text', text: /1\/4/ }))?.text
@@ -246,7 +254,7 @@ test('a running job shows no CPU from a single reading', async ($, on) => {
 test('a stalled job whose process has gone says so, even in a narrow pane', { options: { stallMinutes: 1 } }, async ($, on) => {
   const { clock, sampler } = withRunningJob(on)
   await startSession($)
-  await clock.advance(60_000)
+  await advanceSampling(clock, sampler, 60_000)
   await readJobCpu(clock, sampler, null)
 
   expect(await stepTextIn($, 30)).toBe('process ended · 1/4   25%')
@@ -264,7 +272,7 @@ test('a job still writing its file shows no CPU once its pid is gone', async ($,
 test('a quiet job whose processes are busy is not stalled', { options: { stallMinutes: 1 } }, async ($, on) => {
   const { world, clock, sampler } = withRunningJob(on)
   await startSession($)
-  await clock.advance(60_000)
+  await advanceSampling(clock, sampler, 60_000)
   // 4000 ms of CPU over 5000 ms on 8 cores: busy from 5%.
   await readJobCpu(clock, sampler, 4_000)
   await poll(clock)
@@ -282,7 +290,7 @@ test('a quiet job whose processes are busy is not stalled', { options: { stallMi
 test('a quiet job whose processes are idle is stalled', { options: { stallMinutes: 1 } }, async ($, on) => {
   const { world, clock, sampler } = withRunningJob(on)
   await startSession($)
-  await clock.advance(60_000)
+  await advanceSampling(clock, sampler, 60_000)
   await readJobCpu(clock, sampler, 1_000)
   await poll(clock)
 
@@ -308,4 +316,22 @@ test("a restarted sampler's first reading gives no CPU against the last run's", 
   sampler.write(sampleLine({ sampledMs: clock.now() + 10_000, processes: [[1, 0, 9_000, JOB_PROCESS_STARTED_MS]] }))
   await clock.settle()
   expect(await stepTextIn($, 40)).toBe('1/4   25%')
+})
+
+test('a sampler that writes nothing for 30 s is logged, stopped and started again after a minute', async ($, on) => {
+  const { world, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write(sampleLine())
+  await clock.settle()
+
+  await clock.advance(30_000)
+  expect(sampler.runningCount).toBe(1)
+  await poll(clock)
+  expect(sampler.runningCount).toBe(0)
+  expect(world.logs).toContain('shell-progress: cannot sample the machine: the sampler wrote nothing for 30s')
+  await clock.advance(RESTART_MS - 30_000 - 2 * POLL_MS)
+  expect(sampler.runningCount).toBe(0)
+  await poll(clock)
+  expect(sampler.runningCount).toBe(1)
 })

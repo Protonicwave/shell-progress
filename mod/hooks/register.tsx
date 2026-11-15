@@ -51,6 +51,9 @@ const HINT_TAIL_SEPARATOR = ' · '
 // at most this often, so a machine without Windows PowerShell costs one
 // attempt a minute while a job runs.
 const SAMPLER_RESTART_MS = 60_000
+// A sampler that writes no line for this long, six of its intervals and room
+// for a slow start, has hung, and is stopped and restarted as a failed one.
+const MAX_SAMPLER_SILENCE_MS = 30_000
 const SAMPLER_ARGV = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File']
 const SAMPLER_SCRIPT = 'hooks/sampler.ps1'
 // The end of what a failed sampler wrote to stderr goes in its log line,
@@ -489,14 +492,16 @@ async function pollOnce(
 
 /**
  * Keeps one sampler running while `isWanted`, storing its last two readings
- * in `machineReadings`, and stops it when not. A sampler that cannot start, exits
- * or writes a bad line is logged, once for a lasting fault, and started again
- * on a later call at most once every SAMPLER_RESTART_MS while it stays wanted.
+ * in `machineReadings`, and stops it when not. A sampler that cannot start,
+ * exits, writes a bad line or writes nothing for MAX_SAMPLER_SILENCE_MS is
+ * logged, once for a lasting fault, and started again on a later call at most
+ * once every SAMPLER_RESTART_MS while it stays wanted.
  */
 function machineSampler($: EngineInterface): (isWanted: boolean, nowMs: number) => void {
   const failure = failureLog($, 'cannot sample the machine')
   let running: SamplerRun | undefined
   let lastStartMs = Number.NEGATIVE_INFINITY
+  let lastLineMs = Number.NEGATIVE_INFINITY
   return (isWanted, nowMs) => {
     if (!isWanted) {
       running?.stop()
@@ -505,9 +510,18 @@ function machineSampler($: EngineInterface): (isWanted: boolean, nowMs: number) 
       lastStartMs = Number.NEGATIVE_INFINITY
       return
     }
+    if (running !== undefined && nowMs - lastLineMs > MAX_SAMPLER_SILENCE_MS) {
+      running.stop()
+      running = undefined
+      failure.record(new Error(`the sampler wrote nothing for ${MAX_SAMPLER_SILENCE_MS / MS_PER_SECOND}s`))
+    }
     if (running !== undefined || nowMs - lastStartMs < SAMPLER_RESTART_MS) return
     lastStartMs = nowMs
-    const run = startSampler($, failure.clear)
+    lastLineMs = nowMs
+    const run = startSampler($, atMs => {
+      lastLineMs = atMs
+      failure.clear()
+    })
     running = run
     // Settles without rejecting, so nothing else need wait on it.
     void run.ended
@@ -524,7 +538,7 @@ type SamplerRun = {
   readonly ended: Promise<void>
 }
 
-function startSampler($: EngineInterface, onSample: () => void): SamplerRun {
+function startSampler($: EngineInterface, onSample: (atMs: number) => void): SamplerRun {
   const child = $.process.spawn({ argv: [...SAMPLER_ARGV, `${$.plugin.root}/${SAMPLER_SCRIPT}`] })
   // Rejects when the stream is closed before the child exits, as a stop or a
   // bad line closes it; neither needs the exit code, so that is not a fault.
@@ -548,7 +562,7 @@ function startSampler($: EngineInterface, onSample: () => void): SamplerRun {
         const readings = { previous, current: sample }
         await update($, machineReadings, () => readings)
         previous = sample
-        onSample()
+        onSample(sample.atMs)
       }
     }
     if (isStopped) return
