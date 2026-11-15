@@ -62,7 +62,8 @@ function Get-GpuPercent($previous, $current) {
         if ($null -eq $before) { continue }
         $adapter = $Matches[1]
         $percent = [Diagnostics.CounterSample]::Calculate($before.Sample, $current[$instance].Sample)
-        $adapterPercents[$adapter] = $percent + $(if ($adapterPercents.ContainsKey($adapter)) { $adapterPercents[$adapter] } else { 0.0 })
+        # A missing entry reads as null, which += takes as 0.
+        $adapterPercents[$adapter] += $percent
     }
     $busiest = 0.0
     foreach ($percent in $adapterPercents.Values) { $busiest = [Math]::Max($busiest, $percent) }

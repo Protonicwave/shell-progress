@@ -11,6 +11,15 @@ const MAX_RUNNING_CALLS = 20
 // The pane draws at most five agents; past this the oldest cost is dropped,
 // which only leaves its agent's row without one.
 const MAX_AGENT_COSTS = 50
+const PERCENT = 100
+const TOKENS_PER_THOUSAND = 1_000
+const TOKENS_PER_MILLION = 1_000_000
+const FIVE_HOUR_LIMIT_KIND = 'five_hour'
+// Readings closer together than this give too rough a rate to project.
+const MIN_FORECAST_SPAN_MS = 5 * SECONDS_PER_MINUTE * MS_PER_SECOND
+// One reading per turn. The forecast reads only the newest few, so past this
+// many the oldest are dropped.
+const MAX_LIMIT_READINGS = 20
 
 export const NO_TOOL_CALLS: ToolCalls = { running: [], recent: [] }
 
@@ -140,16 +149,6 @@ export type UsageRow = {
   /** Set when the figures say the limit fills before it resets. */
   readonly isWarning: boolean
 }
-
-const PERCENT = 100
-const TOKENS_PER_THOUSAND = 1_000
-const TOKENS_PER_MILLION = 1_000_000
-const FIVE_HOUR_LIMIT_KIND = 'five_hour'
-// Readings closer together than this give too rough a rate to project.
-const MIN_FORECAST_SPAN_MS = 5 * SECONDS_PER_MINUTE * MS_PER_SECOND
-// One reading per turn. The forecast reads only the newest few, so past this
-// many the oldest are dropped.
-const MAX_LIMIT_READINGS = 20
 
 export const NO_TURN_CONTEXT: TurnContext = { startTokens: null, lastAddedTokens: null }
 

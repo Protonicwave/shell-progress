@@ -401,11 +401,6 @@ function startPolling(
   })
 }
 
-function exitText(result: ProcessSpawnResult | undefined): string {
-  if (result === undefined) return 'before it could be read'
-  return result.signal === null ? `with code ${result.code}` : `on ${result.signal}`
-}
-
 /**
  * A tick that starts `work` unless its last run has not settled, so runs never
  * overlap. `work` must not reject. Neither fs calls nor `agent.list` take a
@@ -542,6 +537,11 @@ type SamplerRun = {
   readonly ended: Promise<void>
 }
 
+function exitText(result: ProcessSpawnResult | undefined): string {
+  if (result === undefined) return 'before it could be read'
+  return result.signal === null ? `with code ${result.code}` : `on ${result.signal}`
+}
+
 function startSampler($: EngineInterface, onSample: (atMs: number) => void): SamplerRun {
   const child = $.process.spawn({ argv: [...SAMPLER_ARGV, `${$.plugin.root}/${SAMPLER_SCRIPT}`] })
   // Rejects when the stream is closed before the child exits, as a stop or a
@@ -578,7 +578,8 @@ function startSampler($: EngineInterface, onSample: (atMs: number) => void): Sam
     stop: () => {
       isStopped = true
       // Ending the stream kills the child, and `ended` settles as the loop
-      // leaves. The value is only what this call resolves with.
+      // leaves. `return` takes a result to settle the stream with, which
+      // nothing reads, so it is an empty one.
       void child.return({ code: null, signal: null }).then(undefined, (error: unknown) => {
         $.ui.log(`shell-progress: cannot stop the sampler: ${errorMessage(error)}`)
       })

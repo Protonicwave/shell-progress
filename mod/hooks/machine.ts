@@ -14,7 +14,7 @@ const BUSY_JOB_CPU_PERCENT = 5
 const PROCESS_FIELD_COUNT = 4
 // From this CPU figure a speed under 100% means the CPU is held back; below
 // it, a slow clock only means there is little to do.
-const BUSY_CPU_PERCENT = 50
+const SPEED_WARNING_MIN_CPU_PERCENT = 50
 const FULL_PERCENT = 100
 const BYTES_PER_GB = 1024 ** 3
 const EXCERPT_CHARS = 80
@@ -66,7 +66,7 @@ export function parseSample(line: string, atMs: number): MachineSample {
 function cpuCountOf(fields: Readonly<Record<string, unknown>>): number {
   const count = fields['cpuCount']
   if (!Number.isSafeInteger(count) || (count as number) < 1) {
-    throw new Error(`expected the sampler's cpuCount to be a whole number of 1 or more, got ${excerpt(JSON.stringify(count) ?? 'nothing')}`)
+    throw new Error(`expected the sampler's cpuCount to be a whole number of 1 or more, got ${valueText(count)}`)
   }
   return count as number
 }
@@ -76,11 +76,11 @@ function processesOf(fields: Readonly<Record<string, unknown>>): readonly Proces
   const listed: unknown = fields['processes']
   if (listed === null) return null
   if (!Array.isArray(listed)) {
-    throw new Error(`expected the sampler's processes to be a list, got ${excerpt(JSON.stringify(listed) ?? 'nothing')}`)
+    throw new Error(`expected the sampler's processes to be a list, got ${valueText(listed)}`)
   }
   return listed.map((entry: unknown, index) => {
     if (!isProcessEntry(entry)) {
-      throw new Error(`expected the sampler's process ${index} to be four whole numbers of 0 or more, got ${excerpt(JSON.stringify(entry) ?? 'nothing')}`)
+      throw new Error(`expected the sampler's process ${index} to be four whole numbers of 0 or more, got ${valueText(entry)}`)
     }
     const [pid, parentPid, cpuMs, startedMs] = entry
     return { pid, parentPid, cpuMs, startedMs }
@@ -99,7 +99,7 @@ function powerOf(fields: Readonly<Record<string, unknown>>): MachineSample['powe
   const power = fields['power']
   if (power === 'mains') return { kind: 'mains' }
   if (power !== 'battery') {
-    throw new Error(`expected the sampler's power to be mains or battery, got ${excerpt(JSON.stringify(power) ?? 'nothing')}`)
+    throw new Error(`expected the sampler's power to be mains or battery, got ${valueText(power)}`)
   }
   if (fields['batteryPercent'] === null) return { kind: 'battery', percentLeft: null }
   const percentLeft = amountOf(fields, 'batteryPercent')
@@ -113,9 +113,14 @@ function powerOf(fields: Readonly<Record<string, unknown>>): MachineSample['powe
 function amountOf(fields: Readonly<Record<string, unknown>>, name: string): number {
   const value = fields[name]
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-    throw new Error(`expected the sampler's ${name} to be a finite number of 0 or more, got ${excerpt(JSON.stringify(value) ?? 'nothing')}`)
+    throw new Error(`expected the sampler's ${name} to be a finite number of 0 or more, got ${valueText(value)}`)
   }
   return value
+}
+
+/** A value from the sampler's line as JSON, cut short, for an error message. */
+function valueText(value: unknown): string {
+  return excerpt(JSON.stringify(value) ?? 'nothing')
 }
 
 function excerpt(text: string): string {
@@ -143,7 +148,7 @@ export function machineText(sample: MachineSample): string {
 export function machineWarnings(sample: MachineSample): readonly string[] {
   const warnings: string[] = []
   const speedPercent = Math.round(sample.cpuSpeedPercent)
-  if (shownCpuPercent(sample) >= BUSY_CPU_PERCENT && speedPercent < FULL_PERCENT) {
+  if (shownCpuPercent(sample) >= SPEED_WARNING_MIN_CPU_PERCENT && speedPercent < FULL_PERCENT) {
     warnings.push(`held at ${speedPercent}% speed`)
   }
   if (sample.power.kind === 'battery') {
