@@ -7,6 +7,7 @@ import type {
   LimitReading,
   ListedAgent,
   MachineSample,
+  ProcessState,
   RunningCall,
   SessionTurn,
   ToolCalls,
@@ -45,6 +46,9 @@ const HIGH_USAGE_FRACTION = 0.8
 // From this many body columns each usage bar shares a row with its label and
 // figures; below it the figures would leave the bar too few cells.
 const ONE_ROW_USAGE_MIN_COLUMNS = 40
+// From this many body columns a running job's row gives its CPU; below it
+// the figure would crowd out the job's name.
+const JOB_CPU_MIN_COLUMNS = 40
 // Wide enough for the longest labels, `5h limit` and `machine`.
 const USAGE_LABEL_COLUMNS = 8
 const USAGE_GAP_COLUMNS = 1
@@ -102,6 +106,8 @@ type PaneView = {
   readonly agentCosts: readonly AgentCost[]
   /** The sampler's last reading, or `null` before its first. */
   readonly machineSample: MachineSample | null
+  /** What each running job's processes are doing, by job file; a job without a state shows no CPU. */
+  readonly processStates: ReadonlyMap<string, ProcessState>
 }
 
 /**
@@ -434,18 +440,19 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
     <Text dimColor>{runningTimeText(line, view.nowMs)}</Text>
   )
 
+  const processPart = processText(view, job, hasStalled)
   if (line.total === 0) {
     const glyph = hasStalled
       ? <Text dimColor>·</Text>
       : <Text color={BAR_COLOUR}>{spinnerFrame(view.nowMs)}</Text>
     return [
-      nameRow(ui, name, <Text dimColor>no step count</Text>),
+      nameRow(ui, name, <Text dimColor>{processPart}no step count</Text>),
       spreadRow(ui, <Text>{glyph} {line.label}</Text>, time),
     ]
   }
 
   return [
-    nameRow(ui, name, <Text>{stepText(line)}</Text>),
+    nameRow(ui, name, <Text>{processPart}{stepText(line)}</Text>),
     barRow(
       ui,
       line.step / line.total,
@@ -454,6 +461,19 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
     ),
     spreadRow(ui, <Text dimColor>{line.label}</Text>, time),
   ]
+}
+
+/**
+ * `cpu 12% · ` while the job's processes are known, unless the pane is too
+ * narrow; `process ended · ` once a stalled job's process has gone, whatever
+ * the width, since that is why it stalled. Otherwise nothing.
+ */
+function processText(view: PaneView, job: Job, hasStalled: boolean): string {
+  const state = view.processStates.get(job.file)
+  if (state === undefined) return ''
+  if (state.kind === 'ended') return hasStalled ? 'process ended · ' : ''
+  if (view.bodyColumns < JOB_CPU_MIN_COLUMNS) return ''
+  return `cpu ${Math.round(state.cpuPercent)}% · `
 }
 
 /** `1m 12s`, and from the third step `1m 12s · about 25s left`. */

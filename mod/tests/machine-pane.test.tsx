@@ -17,6 +17,9 @@ const sampleLine = (changes: Record<string, unknown> = {}) =>
     freeMemoryBytes: 11.2 * GB,
     power: 'mains',
     batteryPercent: null,
+    sampledMs: START_MS,
+    cpuCount: 8,
+    processes: [],
     ...changes,
   })}\r\n`
 
@@ -189,4 +192,71 @@ test('a sampler that exits is logged with what it wrote to stderr', async ($, on
   expect(world.logs).toContain(
     'shell-progress: cannot sample the machine: the sampler exited with code 1: Exception calling "NextValue"',
   )
+})
+
+// The job's process, pid 1 from its file name, started a minute before its helper loaded.
+const JOB_PROCESS_STARTED_MS = START_MS - 60_000
+
+/** Two readings 5 s apart, between which the job's process used `cpuMs`, or none when it is gone. */
+async function readJobCpu(clock: MockClock, sampler: { write: (text: string) => void }, cpuMs: number | null) {
+  const nowMs = clock.now()
+  sampler.write(sampleLine({ sampledMs: nowMs, processes: [[1, 0, 0, JOB_PROCESS_STARTED_MS]] }))
+  await clock.settle()
+  const processes = cpuMs === null ? [] : [[1, 0, cpuMs, JOB_PROCESS_STARTED_MS]]
+  sampler.write(sampleLine({ sampledMs: nowMs + 5_000, processes }))
+  await clock.settle()
+}
+
+async function stepTextIn($: Engine, bodyColumns: number) {
+  const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
+  const text = (await ui.find({ type: 'Text', text: /1\/4/ }))?.text
+  await ui.unmount()
+  return text
+}
+
+test("a running job gives its processes' CPU before its step", async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  // 4000 ms of CPU over 5000 ms on 8 cores.
+  await readJobCpu(clock, sampler, 4_000)
+
+  expect(await stepTextIn($, 40)).toBe('cpu 10% · 1/4   25%')
+})
+
+test("a pane under 40 columns leaves out a running job's CPU", async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  await readJobCpu(clock, sampler, 4_000)
+
+  expect(await stepTextIn($, 39)).toBe('1/4   25%')
+})
+
+test('a running job shows no CPU from a single reading', async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  sampler.write(sampleLine({ processes: [[1, 0, 0, JOB_PROCESS_STARTED_MS]] }))
+  await clock.settle()
+
+  expect(await stepTextIn($, 40)).toBe('1/4   25%')
+})
+
+test('a stalled job whose process has gone says so, even in a narrow pane', { options: { stallMinutes: 1 } }, async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await clock.advance(60_000)
+  await readJobCpu(clock, sampler, null)
+
+  expect(await stepTextIn($, 30)).toBe('process ended · 1/4   25%')
+})
+
+test('a job still writing its file shows no CPU once its pid is gone', async ($, on) => {
+  const { clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  await readJobCpu(clock, sampler, null)
+
+  expect(await stepTextIn($, 40)).toBe('1/4   25%')
 })

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, ProcessSpawnResult, Register, Timer } from 'claude-code'
 
 import type { Job, ListedAgent, RunningCall, SessionTurn } from '../types'
-import { parseSample, takeLines } from './machine'
+import { parseSample, processStates, takeLines } from './machine'
 import type { FinishedJob } from './progress'
 import { PANE_COLUMNS, PANE_ID, PANE_TITLE, drawPane } from './pane'
 import { POLL_INTERVAL_MS, pollJobs } from './poll'
@@ -94,8 +94,8 @@ const agentCosts = atom({ plugin: 'shell-progress', key: 'agentCosts' } as const
 // Written only when it changes, so the prompt hint is drawn again once per
 // change rather than once a poll.
 const hintUsage = atom({ plugin: 'shell-progress', key: 'hintUsage' } as const, null)
-const machineSample = atom({ plugin: 'shell-progress', key: 'machineSample' } as const, null, {
-  shape: 'machine-sample-1',
+const machineReadings = atom({ plugin: 'shell-progress', key: 'machineReadings' } as const, null, {
+  shape: 'machine-readings-1',
 })
 
 export const register: Register = (on, options) => {
@@ -137,7 +137,7 @@ export const register: Register = (on, options) => {
       readings,
       agentList,
       costs,
-      sample,
+      machine,
       nowMs,
       usage,
     ] = await Promise.all([
@@ -152,7 +152,7 @@ export const register: Register = (on, options) => {
         read($, limitReadings),
         read($, agents),
         read($, agentCosts),
-        read($, machineSample),
+        read($, machineReadings),
         $.clock.now(),
         $.session.usage(),
       ])
@@ -173,7 +173,8 @@ export const register: Register = (on, options) => {
       limitReadings: readings,
       agents: agentList,
       agentCosts: costs,
-      machineSample: sample,
+      machineSample: machine?.current ?? null,
+      processStates: processStates(jobList, machine, nowMs),
     })
   })
 
@@ -486,8 +487,8 @@ async function pollOnce(
 }
 
 /**
- * Keeps one sampler running while `isWanted`, storing each reading in
- * `machineSample`, and stops it when not. A sampler that cannot start, exits
+ * Keeps one sampler running while `isWanted`, storing its last two readings
+ * in `machineReadings`, and stops it when not. A sampler that cannot start, exits
  * or writes a bad line is logged, once for a lasting fault, and started again
  * on a later call at most once every SAMPLER_RESTART_MS while it stays wanted.
  */
@@ -540,7 +541,7 @@ function startSampler($: EngineInterface, onSample: () => void): SamplerRun {
       rest = taken.rest
       for (const line of taken.lines) {
         const sample = parseSample(line, await $.clock.now())
-        await update($, machineSample, () => sample)
+        await update($, machineReadings, last => ({ previous: last?.current ?? null, current: sample }))
         onSample()
       }
     }

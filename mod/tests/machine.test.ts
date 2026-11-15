@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import type { MachineSample } from '../types'
-import { isCurrentSample, machineText, machineWarnings, parseSample, takeLines } from '../hooks/machine'
+import type { Job, MachineSample, ProcessReading } from '../types'
+import {
+  isCurrentSample,
+  machineText,
+  machineWarnings,
+  parseSample,
+  processState,
+  processStates,
+  takeLines,
+  treeCpu,
+} from '../hooks/machine'
 
 const AT_MS = 1_700_000_000_000
 const GB = 1024 ** 3
@@ -13,6 +22,9 @@ const fields = {
   freeMemoryBytes: 11.2 * GB,
   power: 'mains',
   batteryPercent: null,
+  sampledMs: AT_MS - 3,
+  cpuCount: 8,
+  processes: [[4120, 812, 1500, AT_MS - 60_000]],
 }
 const lineWith = (changes: Record<string, unknown>) => JSON.stringify({ ...fields, ...changes })
 
@@ -23,6 +35,9 @@ const sample = (changes: Partial<MachineSample> = {}): MachineSample => ({
   gpuPercent: 5.3,
   freeMemoryBytes: 11.2 * GB,
   power: { kind: 'mains' },
+  sampledMs: AT_MS - 3,
+  cpuCount: 8,
+  processes: [{ pid: 4120, parentPid: 812, cpuMs: 1500, startedMs: AT_MS - 60_000 }],
   ...changes,
 })
 
@@ -40,6 +55,10 @@ describe('parseSample', () => {
       kind: 'battery',
       percentLeft: null,
     })
+  })
+
+  test('reads an empty process list', () => {
+    expect(parseSample(lineWith({ processes: [] }), AT_MS).processes).toEqual([])
   })
 
   test('reads a GPU figure of null as no GPU counters', () => {
@@ -68,6 +87,14 @@ describe('parseSample', () => {
     ['a missing power source', { power: undefined }, /power to be mains or battery, got nothing/],
     ['a battery charge over 100', { power: 'battery', batteryPercent: 255 }, /batteryPercent to be at most 100/],
     ['a battery charge that is not a number', { power: 'battery', batteryPercent: '41' }, /batteryPercent/],
+    ['a missing sampling time', { sampledMs: undefined }, /sampledMs/],
+    ['no processors', { cpuCount: 0 }, /cpuCount to be a whole number of 1 or more, got 0/],
+    ['part of a processor', { cpuCount: 7.5 }, /cpuCount to be a whole number of 1 or more, got 7.5/],
+    ['processes that are not a list', { processes: {} }, /processes to be a list, got \{\}/],
+    ['a process of three numbers', { processes: [[1, 2, 3]] }, /process 0 to be four whole numbers of 0 or more, got \[1,2,3\]/],
+    ['a process with a fraction', { processes: [[1, 2, 3, 4], [5, 6, 7.5, 8]] }, /process 1 to be four/],
+    ['a process with a negative number', { processes: [[1, -2, 3, 4]] }, /process 0 to be four/],
+    ['a process that is not a list', { processes: [7] }, /process 0 to be four.*, got 7$/],
   ]
   for (const [name, changes, message] of badFields) {
     test(`rejects ${name}`, () => {
@@ -96,8 +123,13 @@ describe('takeLines', () => {
     expect(takeLines('', '{"a"')).toEqual({ lines: [], rest: '{"a"' })
   })
 
-  test('rejects a part line past 4096 characters', () => {
-    expect(() => takeLines('x'.repeat(4000), 'x'.repeat(100))).toThrow(/under 4096 characters, got 4100/)
+  test('takes a line that lists thousands of processes', () => {
+    const line = 'x'.repeat(200_000)
+    expect(takeLines('', `${line}\n`)).toEqual({ lines: [line], rest: '' })
+  })
+
+  test('rejects a part line past 1000000 characters', () => {
+    expect(() => takeLines('x'.repeat(999_990), 'x'.repeat(20))).toThrow(/under 1000000 characters, got 1000010/)
   })
 })
 
@@ -145,5 +177,153 @@ describe('machineWarnings', () => {
       sample({ cpuPercent: 80, cpuSpeedPercent: 70, power: { kind: 'battery', percentLeft: 41 } }),
     )
     expect(warnings).toEqual(['held at 70% speed', 'on battery, 41%'])
+  })
+})
+
+// The sampler reads every five seconds; the job's process started a minute
+// before its helper loaded at STARTED_SEC.
+const INTERVAL_MS = 5_000
+const STARTED_SEC = 1_699_999_000
+const ROOT_STARTED_MS = (STARTED_SEC - 60) * 1000
+const BEFORE_MS = STARTED_SEC * 1000 + 600_000
+const AFTER_MS = BEFORE_MS + INTERVAL_MS
+
+const process = (pid: number, parentPid: number, cpuMs: number, startedMs = ROOT_STARTED_MS): ProcessReading => ({
+  pid,
+  parentPid,
+  cpuMs,
+  startedMs,
+})
+const reading = (sampledMs: number, processes: readonly ProcessReading[]) =>
+  sample({ atMs: sampledMs, sampledMs, cpuCount: 8, processes })
+
+describe('treeCpu', () => {
+  test('sums the root and its descendants as a share of all cores', () => {
+    const before = reading(BEFORE_MS, [process(10, 1, 1000), process(11, 10, 0), process(12, 11, 500)])
+    const after = reading(AFTER_MS, [process(10, 1, 2000), process(11, 10, 2000), process(12, 11, 1500)])
+    // 4000 ms of CPU over 5000 ms on 8 cores.
+    expect(treeCpu(before, after, 10)).toBe(10)
+  })
+
+  test("leaves out other trees, including the root's parent", () => {
+    const before = reading(BEFORE_MS, [process(1, 0, 0), process(10, 1, 0), process(20, 1, 0)])
+    const after = reading(AFTER_MS, [process(1, 0, 9000), process(10, 1, 2000), process(20, 1, 9000)])
+    expect(treeCpu(before, after, 10)).toBe(5)
+  })
+
+  test('counts all the CPU of a process started since the previous reading', () => {
+    const before = reading(BEFORE_MS, [process(10, 1, 0)])
+    const after = reading(AFTER_MS, [process(10, 1, 0), process(11, 10, 4000, BEFORE_MS + 1)])
+    expect(treeCpu(before, after, 10)).toBe(10)
+  })
+
+  test('survives a process that ended between the readings', () => {
+    const before = reading(BEFORE_MS, [process(10, 1, 0), process(11, 10, 3000)])
+    const after = reading(AFTER_MS, [process(10, 1, 2000)])
+    expect(treeCpu(before, after, 10)).toBe(5)
+  })
+
+  test('takes a reused pid as a new process', () => {
+    const before = reading(BEFORE_MS, [process(10, 1, 0), process(11, 10, 9000)])
+    const after = reading(AFTER_MS, [process(10, 1, 0), process(11, 10, 2000, BEFORE_MS + 1)])
+    expect(treeCpu(before, after, 10)).toBe(5)
+  })
+
+  test('leaves out a process missing from the previous reading that started before it', () => {
+    const before = reading(BEFORE_MS, [process(10, 1, 0)])
+    const after = reading(AFTER_MS, [process(10, 1, 0), process(11, 10, 9000, BEFORE_MS - 1)])
+    expect(treeCpu(before, after, 10)).toBe(0)
+  })
+
+  test('leaves out a process older than the parent it names, whose pid was reused', () => {
+    const before = reading(BEFORE_MS, [process(10, 1, 0), process(11, 10, 0, ROOT_STARTED_MS - 1)])
+    const after = reading(AFTER_MS, [process(10, 1, 0), process(11, 10, 9000, ROOT_STARTED_MS - 1)])
+    expect(treeCpu(before, after, 10)).toBe(0)
+  })
+
+  test('visits each process once whatever the parent links say', () => {
+    const before = reading(BEFORE_MS, [process(10, 11, 0), process(11, 10, 0)])
+    const after = reading(AFTER_MS, [process(10, 11, 2000), process(11, 10, 2000)])
+    expect(treeCpu(before, after, 10)).toBe(10)
+  })
+
+  test('gives 0 when the root has gone', () => {
+    expect(treeCpu(reading(BEFORE_MS, [process(10, 1, 0)]), reading(AFTER_MS, []), 10)).toBe(0)
+  })
+
+  test('caps the share at 100%', () => {
+    const before = reading(BEFORE_MS, [process(10, 1, 0)])
+    const after = reading(AFTER_MS, [process(10, 1, 41_000)])
+    expect(treeCpu(before, after, 10)).toBe(100)
+  })
+})
+
+describe('processState', () => {
+  const before = reading(BEFORE_MS, [process(10, 1, 0)])
+
+  test('is busy from 5% of all cores', () => {
+    expect(processState('10', STARTED_SEC, before, reading(AFTER_MS, [process(10, 1, 2000)]))).toEqual({
+      kind: 'busy',
+      cpuPercent: 5,
+    })
+  })
+
+  test('is idle below 5%', () => {
+    expect(processState('10', STARTED_SEC, before, reading(AFTER_MS, [process(10, 1, 1999)]))).toEqual({
+      kind: 'idle',
+      cpuPercent: 4.9975,
+    })
+  })
+
+  test('has ended when its pid is gone', () => {
+    expect(processState('10', STARTED_SEC, before, reading(AFTER_MS, [process(11, 1, 9000)]))).toEqual({ kind: 'ended' })
+  })
+
+  test('has ended when its pid names a process started after the job', () => {
+    const reused = reading(AFTER_MS, [process(10, 1, 9000, (STARTED_SEC + 1) * 1000)])
+    expect(processState('10', STARTED_SEC, before, reused)).toEqual({ kind: 'ended' })
+  })
+
+  test("is running when its process started within the job's first second", () => {
+    // The helper writes its start time cut to the whole second.
+    const same = reading(AFTER_MS, [process(10, 1, 0, (STARTED_SEC + 1) * 1000 - 1)])
+    expect(processState('10', STARTED_SEC, before, same).kind).toBe('idle')
+  })
+})
+
+describe('processStates', () => {
+  const job = (file: string, kind: 'running' | 'finished'): Job => ({
+    file,
+    script: 'build.sh',
+    pid: file.replace(/\D/g, ''),
+    mtimeMs: BEFORE_MS,
+    line:
+      kind === 'running'
+        ? { kind: 'running', startedSec: STARTED_SEC, step: 1, total: 4, label: '' }
+        : { kind: 'finished', startedSec: STARTED_SEC, exitCode: 0, endedSec: STARTED_SEC + 9 },
+    lastLabel: '',
+  })
+  const jobs = [job('build.sh-10.txt', 'running'), job('sync.sh-11.txt', 'finished')]
+  const before = reading(BEFORE_MS, [process(10, 1, 0), process(11, 1, 0)])
+  const after = reading(AFTER_MS, [process(10, 1, 2000), process(11, 1, 0)])
+
+  test('gives the state of each running job', () => {
+    const states = processStates(jobs, { previous: before, current: after }, AFTER_MS)
+    expect([...states]).toEqual([['build.sh-10.txt', { kind: 'busy', cpuPercent: 5 }]])
+  })
+
+  test('gives none before the second reading', () => {
+    expect(processStates(jobs, { previous: null, current: after }, AFTER_MS).size).toBe(0)
+    expect(processStates(jobs, null, AFTER_MS).size).toBe(0)
+  })
+
+  test('gives none once the last reading is 15 s old', () => {
+    expect(processStates(jobs, { previous: before, current: after }, AFTER_MS + 15_001).size).toBe(0)
+  })
+
+  test('gives none across a gap of over 15 s between readings, or a clock that went back', () => {
+    const late = reading(BEFORE_MS + 15_001, after.processes)
+    expect(processStates(jobs, { previous: before, current: late }, late.atMs).size).toBe(0)
+    expect(processStates(jobs, { previous: after, current: before }, BEFORE_MS).size).toBe(0)
   })
 })

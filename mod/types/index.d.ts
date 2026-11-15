@@ -119,7 +119,35 @@ export type MachineSample = {
     | { readonly kind: 'mains' }
     /** `percentLeft` is `null` when Windows does not know the charge. */
     | { readonly kind: 'battery'; readonly percentLeft: number | null }
+  /** When the sampler read the processes, by its own clock. */
+  readonly sampledMs: number
+  /** Logical processors, which a share of all cores is taken against. */
+  readonly cpuCount: number
+  readonly processes: readonly ProcessReading[]
 }
+
+/** One process in a sampler reading. */
+export type ProcessReading = {
+  readonly pid: number
+  /** The process that created it, which may have ended and its pid been reused since. */
+  readonly parentPid: number
+  /** CPU time since it started, summed over all cores. */
+  readonly cpuMs: number
+  readonly startedMs: number
+}
+
+/** The sampler's last two readings, so CPU can be taken between them. */
+export type MachineReadings = {
+  /** `null` until the sampler's second reading. */
+  readonly previous: MachineSample | null
+  readonly current: MachineSample
+}
+
+/** What a running job's process tree is doing, between the last two readings. */
+export type ProcessState =
+  | { readonly kind: 'ended' }
+  /** Busy from BUSY_JOB_CPU_PERCENT; `cpuPercent` is a share of all cores. */
+  | { readonly kind: 'busy' | 'idle'; readonly cpuPercent: number }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -143,8 +171,8 @@ declare module 'claude-code' {
       agentCosts: Shaped<readonly AgentCost[]>
       /** The usage figures the prompt hint ends with, or `null` while it shows none. */
       hintUsage: string | null
-      /** The sampler's last reading, or `null` before its first. */
-      machineSample: Shaped<MachineSample | null>
+      /** `null` before the sampler's first reading. */
+      machineReadings: Shaped<MachineReadings | null>
     }
   }
 }

@@ -180,7 +180,8 @@ Under the readings, in the warning colour, `held at 78% speed` says a CPU at
 back, and `on battery, 41%` says the laptop is off mains.
 
 The readings come from `mod/hooks/sampler.ps1`, one Windows PowerShell process
-that reads Windows performance counters every 5 seconds. The mod starts it
+that reads Windows performance counters, every process's among them, every 5
+seconds. The mod starts it
 with the first unfinished job and stops it after the last. A reading older
 than 15 seconds is not shown. When the sampler cannot start, as on a machine
 without Windows PowerShell, or exits, or writes a line the mod cannot read,
@@ -206,6 +207,18 @@ which is how a script that was killed before it could write its finished line
 shows. Under a Finished heading come the five newest jobs that ended during the
 session, with how long each took and, for a failure, its exit code. A file
 that does not hold a progress line shows as `unreadable progress line`.
+
+While the sampler runs, a running job's first row also gives the CPU its
+processes used between the last two readings, such as `cpu 12% · 7/12  58%`:
+the process whose id names the job's file and every process descended from
+it, as CPU time over elapsed time on all logical processors. A
+single-threaded job at full speed on 8 of them reads about 12%. The machine
+row measures against the base clock speed, so while the CPU runs faster than
+that, its figure is above the sum of the jobs'. A pane under 40 columns
+leaves the job's figure out. A stalled job whose process has ended, or whose
+id now names a process started after the job, reads `process ended`, at any
+width. A process that outlives the parent that started it, as a detached
+daemon does, is not counted.
 
 Pressing a job's name expands its row to the path of its progress file, its
 process id, the time it started and, once finished, its exit code. Pressing it
