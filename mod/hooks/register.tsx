@@ -15,8 +15,8 @@ import {
   finishedSince,
   hasRunningJob,
   isDismissed,
-  isStalled,
   isWorthNotifying,
+  stallState,
   statusSummary,
 } from './progress'
 import {
@@ -629,7 +629,7 @@ function isLive(
   stallMs: number,
   states: ReadonlyMap<string, ProcessState>,
 ): boolean {
-  return job.line?.kind === 'running' && !isStalled(job, nowMs, stallMs, states)
+  return job.line?.kind === 'running' && stallState(job, nowMs, stallMs, states) !== 'stalled'
 }
 
 async function openPaneOnce($: EngineInterface): Promise<void> {

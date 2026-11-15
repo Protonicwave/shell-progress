@@ -63,32 +63,20 @@ function numericFields(match: RegExpExecArray): readonly [number, number, number
 }
 
 /**
- * Whether a running job's file has gone unchanged for `stallMs` at `nowMs`
- * while its processes, by job file in `processStates`, are not known to be
- * busy, which is how a killed or hung script shows. A finished or unreadable
- * job never stalls.
+ * How a job stands against the stall time at `nowMs`. A running job whose
+ * file has gone unchanged for `stallMs` is `quiet` while its processes, by
+ * job file in `processStates`, are busy, and otherwise `stalled`, which is how
+ * a killed or hung script shows. Any other job is `active`: a running one
+ * whose file changed in time, and every finished or unreadable one.
  */
-export function isStalled(
+export function stallState(
   job: Job,
   nowMs: number,
   stallMs: number,
   processStates: ReadonlyMap<string, ProcessState>,
-): boolean {
-  return hasQuietFile(job, nowMs, stallMs) && processStates.get(job.file)?.kind !== 'busy'
-}
-
-/** Whether a running job's file has gone unchanged for `stallMs` while its processes are busy. */
-export function isQuietButBusy(
-  job: Job,
-  nowMs: number,
-  stallMs: number,
-  processStates: ReadonlyMap<string, ProcessState>,
-): boolean {
-  return hasQuietFile(job, nowMs, stallMs) && processStates.get(job.file)?.kind === 'busy'
-}
-
-function hasQuietFile(job: Job, nowMs: number, stallMs: number): boolean {
-  return job.line?.kind === 'running' && nowMs - job.mtimeMs >= stallMs
+): 'active' | 'quiet' | 'stalled' {
+  if (job.line?.kind !== 'running' || nowMs - job.mtimeMs < stallMs) return 'active'
+  return processStates.get(job.file)?.kind === 'busy' ? 'quiet' : 'stalled'
 }
 
 /**
@@ -104,7 +92,8 @@ export function statusSummary(
   const parts: string[] = []
   for (const job of jobs) {
     if (job.line?.kind !== 'running') continue
-    const state = isStalled(job, nowMs, stallMs, processStates) ? 'stalled' : progressText(job.line)
+    const isStalled = stallState(job, nowMs, stallMs, processStates) === 'stalled'
+    const state = isStalled ? 'stalled' : progressText(job.line)
     parts.push(`${shortName(job.script)} ${state}`)
   }
   if (parts.length === 0) return undefined

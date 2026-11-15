@@ -24,12 +24,11 @@ import {
   finishedText,
   hasRunningJob,
   isFinished,
-  isQuietButBusy,
-  isStalled,
   remainingSeconds,
   remainingText,
   runKey,
   shownJobs,
+  stallState,
 } from './progress'
 import type { UsageRow } from './session'
 import { agentCostText, costText, shortDurationText, usageRows } from './session'
@@ -359,7 +358,7 @@ function jobsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
   )
   if (unfinished.length === 0 && finished.length === 0 && hiddenCount === 0) return undefined
   const runningCount = unfinished.filter(
-    job => job.line !== null && !isStalled(job, view.nowMs, view.stallMs, view.processStates),
+    job => job.line !== null && jobStall(view, job) !== 'stalled',
   ).length
   const count = countText(runningCount, unfinished.length, finished.length)
 
@@ -370,7 +369,7 @@ function jobsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
         <Box key={job.file} flexDirection="column" marginTop={1}>
           {unfinishedRows(ui, view, job)}
           {job.file === view.expandedJob &&
-            jobDetails(ui, view, job, isStalled(job, view.nowMs, view.stallMs, view.processStates))}
+            jobDetails(ui, view, job, jobStall(view, job) === 'stalled')}
         </Box>
       ))}
       {finished.length > 0 && (
@@ -429,8 +428,9 @@ function unfinishedRows(ui: PaneElements, view: PaneView, job: UnfinishedJob): R
   }
 
   const line = job.line
-  const hasStalled = isStalled(job, view.nowMs, view.stallMs, view.processStates)
-  const time = jobTime(ui, view, job, line, hasStalled)
+  const stall = jobStall(view, job)
+  const hasStalled = stall === 'stalled'
+  const time = jobTime(ui, view, job, line, stall)
 
   const processPart = processText(view, job, hasStalled)
   if (line.total === 0) {
@@ -474,18 +474,28 @@ function processText(view: PaneView, job: Job, hasStalled: boolean): string {
  * redrawn for it; a quiet job whose processes are busy, how long its file has
  * been quiet; any other job, its running time.
  */
-function jobTime({ Text }: PaneElements, view: PaneView, job: Job, line: RunningLine, hasStalled: boolean) {
-  if (hasStalled) {
+function jobTime(
+  { Text }: PaneElements,
+  view: PaneView,
+  job: Job,
+  line: RunningLine,
+  stall: ReturnType<typeof stallState>,
+) {
+  if (stall === 'stalled') {
     return (
       <Text color={STALLED_COLOUR}>
         stalled after {durationText(job.mtimeMs / MS_PER_SECOND - line.startedSec)}
       </Text>
     )
   }
-  if (isQuietButBusy(job, view.nowMs, view.stallMs, view.processStates)) {
+  if (stall === 'quiet') {
     return <Text>quiet {durationText((view.nowMs - job.mtimeMs) / MS_PER_SECOND)} · busy</Text>
   }
   return <Text dimColor>{runningTimeText(line, view.nowMs)}</Text>
+}
+
+function jobStall(view: PaneView, job: Job) {
+  return stallState(job, view.nowMs, view.stallMs, view.processStates)
 }
 
 /** `1m 12s`, and from the third step `1m 12s · about 25s left`. */

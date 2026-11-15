@@ -9,13 +9,12 @@ import {
   durationText,
   finishedSince,
   finishedText,
-  isQuietButBusy,
-  isStalled,
   isWorthNotifying,
   parseProgressLine,
   remainingSeconds,
   remainingText,
   shownJobs,
+  stallState,
   statusSummary,
 } from '../hooks/progress'
 import type { FinishedJob, RunningLine } from '../hooks/progress'
@@ -114,58 +113,42 @@ describe('parseProgressLine', () => {
   }
 })
 
-describe('isStalled', () => {
-  test('a running job is not stalled just before the threshold', () => {
-    const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS + 1)
-    expect(isStalled(quiet, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe(false)
+describe('stallState', () => {
+  const quietFile = () => job('build.sh', running(1, 3), NOW_MS - STALL_MS)
+
+  test('a running job is active just before the threshold', () => {
+    const recent = job('build.sh', running(1, 3), NOW_MS - STALL_MS + 1)
+    expect(stallState(recent, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('active')
+    expect(stallState(recent, NOW_MS, STALL_MS, new Map([[recent.file, BUSY]]))).toBe('active')
   })
 
   test('a running job is stalled once its file is unchanged for the threshold', () => {
-    const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS)
-    expect(isStalled(quiet, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe(true)
+    expect(stallState(quietFile(), NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('stalled')
   })
 
   test('a job with no step count stalls too', () => {
     const quiet = job('sync.sh', running(0, 0), NOW_MS - STALL_MS)
-    expect(isStalled(quiet, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe(true)
+    expect(stallState(quiet, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('stalled')
   })
 
-  test('a finished job never stalls, however old', () => {
+  test('a finished job is active however old', () => {
     const line = parseProgressLine('1700000000 done -1 1700000060')
-    expect(isStalled(job('migrate.sh', line, 0), NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe(false)
+    expect(stallState(job('migrate.sh', line, 0), NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('active')
   })
 
-  test('an unreadable job never stalls', () => {
-    expect(isStalled(job('odd.sh', null, 0), NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe(false)
+  test('an unreadable job is active however old', () => {
+    expect(stallState(job('odd.sh', null, 0), NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe('active')
   })
 
-  test('a quiet job whose processes are busy is not stalled', () => {
-    const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS)
-    expect(isStalled(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, BUSY]]))).toBe(false)
+  test('a job whose file is unchanged while its processes are busy is quiet', () => {
+    const quiet = quietFile()
+    expect(stallState(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, BUSY]]))).toBe('quiet')
   })
 
-  test('a quiet job whose processes are idle or ended is stalled', () => {
-    const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS)
-    expect(isStalled(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, IDLE]]))).toBe(true)
-    expect(isStalled(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, { kind: 'ended' }]]))).toBe(true)
-  })
-})
-
-describe('isQuietButBusy', () => {
-  test('holds once a busy job\'s file is unchanged for the threshold', () => {
-    const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS)
-    expect(isQuietButBusy(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, BUSY]]))).toBe(true)
-  })
-
-  test('does not hold before the threshold', () => {
-    const recent = job('build.sh', running(1, 3), NOW_MS - STALL_MS + 1)
-    expect(isQuietButBusy(recent, NOW_MS, STALL_MS, new Map([[recent.file, BUSY]]))).toBe(false)
-  })
-
-  test('does not hold for an idle job or one with no state', () => {
-    const quiet = job('build.sh', running(1, 3), NOW_MS - STALL_MS)
-    expect(isQuietButBusy(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, IDLE]]))).toBe(false)
-    expect(isQuietButBusy(quiet, NOW_MS, STALL_MS, NO_PROCESS_STATES)).toBe(false)
+  test('a job whose file is unchanged while its processes are idle or ended is stalled', () => {
+    const quiet = quietFile()
+    expect(stallState(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, IDLE]]))).toBe('stalled')
+    expect(stallState(quiet, NOW_MS, STALL_MS, new Map([[quiet.file, { kind: 'ended' }]]))).toBe('stalled')
   })
 })
 
