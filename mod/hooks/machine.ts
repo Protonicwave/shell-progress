@@ -154,9 +154,9 @@ export function machineWarnings(sample: MachineSample): readonly string[] {
 
 /**
  * The state of each running job's process tree between the last two
- * readings, by job file. Empty before the second reading, once the last is
- * no longer current, and when the readings are not in order or are further
- * apart than a current reading may be old, as after the sampler restarts.
+ * readings, by job file. Empty before a sampler's second reading, once the
+ * last is no longer current, and when the readings are not in order or are
+ * further apart than a current reading may be old.
  */
 export function processStates(
   jobs: readonly Job[],

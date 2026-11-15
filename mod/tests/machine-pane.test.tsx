@@ -292,3 +292,20 @@ test('a quiet job whose processes are idle is stalled', { options: { stallMinute
   await ui.unmount()
   expect(world.statuses.at(-1)).toBe('build stalled')
 })
+
+test("a restarted sampler's first reading gives no CPU against the last run's", async ($, on) => {
+  const { files, clock, sampler } = withRunningJob(on)
+  await startSession($)
+  await poll(clock)
+  await readJobCpu(clock, sampler, 4_000)
+  finishJob(files)
+  await poll(clock)
+  files.set('deploy.sh-1.txt', { text: runningLine(1, 4, 'uploading'), mtimeMs: clock.now() })
+  await poll(clock)
+  expect(sampler.runningCount).toBe(1)
+
+  // 6 s after the last run's second reading, within the 15 s a pair may span.
+  sampler.write(sampleLine({ sampledMs: clock.now() + 10_000, processes: [[1, 0, 9_000, JOB_PROCESS_STARTED_MS]] }))
+  await clock.settle()
+  expect(await stepTextIn($, 40)).toBe('1/4   25%')
+})

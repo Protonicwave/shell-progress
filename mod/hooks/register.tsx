@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, ProcessSpawnResult, Register, Timer } from 'claude-code'
 
-import type { Job, ListedAgent, ProcessState, RunningCall, SessionTurn } from '../types'
+import type { Job, ListedAgent, MachineSample, ProcessState, RunningCall, SessionTurn } from '../types'
 import { parseSample, processStates, takeLines } from './machine'
 import type { FinishedJob } from './progress'
 import { PANE_COLUMNS, PANE_ID, PANE_TITLE, drawPane } from './pane'
@@ -533,6 +533,9 @@ function startSampler($: EngineInterface, onSample: () => void): SamplerRun {
   const ended = (async () => {
     let rest = ''
     let errorText = ''
+    // Each run converts process start times on its own, to the millisecond,
+    // so a reading is paired only with the one before it in the same run.
+    let previous: MachineSample | null = null
     for await (const { stream, text } of child) {
       if (stream === 'stderr') {
         errorText = `${errorText}${text}`.slice(-MAX_SAMPLER_ERROR_CHARS)
@@ -542,7 +545,9 @@ function startSampler($: EngineInterface, onSample: () => void): SamplerRun {
       rest = taken.rest
       for (const line of taken.lines) {
         const sample = parseSample(line, await $.clock.now())
-        await update($, machineReadings, last => ({ previous: last?.current ?? null, current: sample }))
+        const readings = { previous, current: sample }
+        await update($, machineReadings, () => readings)
+        previous = sample
         onSample()
       }
     }
