@@ -39,6 +39,8 @@ const endedCall = (id: string, hasFailed = false): EndedCall => ({
 const ARGUMENT_CASES: readonly (readonly [string, Record<string, unknown>, string])[] = [
   ['Bash', { command: 'npm test -- orders' }, 'npm test -- orders'],
   ['Bash', { command: 'cd mod\nnpm test' }, 'cd mod'],
+  ['PowerShell', { command: 'Get-ChildItem mod' }, 'Get-ChildItem mod'],
+  ['PowerShell', { command: 'Set-Location mod\nnpm test' }, 'Set-Location mod'],
   ['Read', { file_path: 'docs/migrations.md' }, 'docs/migrations.md'],
   ['Edit', { file_path: 'src/a.ts', old_string: 'a', new_string: 'b' }, 'src/a.ts'],
   ['Write', { file_path: 'src/b.ts', content: 'x' }, 'src/b.ts'],

@@ -30,6 +30,7 @@ export const NO_TOOL_CALLS: ToolCalls = { running: [], recent: [] }
 export function toolArgumentText(tool: string, input: Readonly<Record<string, unknown>>): string {
   switch (tool) {
     case 'Bash':
+    case 'PowerShell':
       return textOf(input['command']).split('\n', 1)[0] ?? ''
     case 'Read':
     case 'Edit':
