@@ -120,11 +120,12 @@ test('Recent keeps the three newest calls, newest first, and marks a failed one'
 
 test('a call still running when the turn ends leaves Now', async ($, on) => {
   const { clock } = fakeWorld(on, new Map())
-  on('tool.call', heldTool().hook)
+  const tool = heldTool()
+  on('tool.call', tool.hook)
   await startSession($)
   await startTurn($)
 
-  void $.tool.call({ tool: 'Bash', command: 'sleep 100' })
+  const call = $.tool.call({ tool: 'Bash', command: 'sleep 100' })
   await clock.advance(1_000)
   const ui = await mountPane($)
   expect(await ui.find({ type: 'Text', text: 'sleep 100' })).toBeDefined()
@@ -136,6 +137,11 @@ test('a call still running when the turn ends leaves Now', async ($, on) => {
   )
   expect(await ui.find({ type: 'Text', text: /^turn / })).toBeUndefined()
   await ui.unmount()
+
+  // A call still held when the test ends is rejected at teardown, with
+  // nothing left to handle the rejection.
+  tool.answer({ result: {} })
+  await call
 })
 
 test("a subagent's turns and calls are not shown", async ($, on) => {
@@ -380,6 +386,14 @@ const agent = (id: string, description: string, status: AgentStatus = 'running')
   description,
   type: 'Explore',
   status,
+  kind: 'local_agent',
+  taskStatus: 'running',
+  label: description,
+  startTime: 0,
+  cwd: '',
+  tokenCount: 0,
+  tokenSamples: [],
+  hasRow: true,
 })
 
 test('Agents lists the agents newest first with their status, and drops one the engine drops', async ($, on) => {

@@ -2,6 +2,7 @@ import type { Color, Elements, RenderNode, SessionUsage } from 'claude-code'
 
 import type {
   AgentCost,
+  BackgroundShell,
   EndedCall,
   Job,
   LimitReading,
@@ -32,6 +33,8 @@ import {
 } from './progress'
 import type { UsageRow } from './session'
 import { agentCostText, costText, shortDurationText, usageRows } from './session'
+import { shellRows } from './shells'
+import type { ShellRow } from './shells'
 
 export const PANE_ID = 'shell-progress'
 export const PANE_TITLE = 'This session'
@@ -105,6 +108,8 @@ type PaneView = {
   readonly agents: readonly ListedAgent[]
   /** What each finished agent took, oldest first. */
   readonly agentCosts: readonly AgentCost[]
+  /** Oldest first. */
+  readonly backgroundShells: readonly BackgroundShell[]
   /** The sampler's last reading, or `null` before its first. */
   readonly machineSample: MachineSample | null
   /** What each running job's processes are doing, by job file; a job without a state shows no CPU. */
@@ -112,9 +117,9 @@ type PaneView = {
 }
 
 /**
- * Draws the session: the call running now, the jobs, the agents, the last
- * calls, then the usage bars and the cost. A group with nothing in it is left
- * out.
+ * Draws the session: the call running now, the jobs, the background
+ * shells, the agents, the last calls, then the usage bars and the cost. A
+ * group with nothing in it is left out.
  */
 export function drawPane(ui: PaneElements, view: PaneView) {
   const { Box, Text } = ui
@@ -127,6 +132,7 @@ export function drawPane(ui: PaneElements, view: PaneView) {
       {spreadRow(ui, <Text bold>{PANE_TITLE}</Text>, turnTime)}
       <Box marginTop={1}>{nowRow(ui, view)}</Box>
       {jobsGroup(ui, view)}
+      {shellsGroup(ui, view)}
       {agentsGroup(ui, view)}
       {recentGroup(ui, view.toolCalls.recent)}
       {usageGroup(ui, view)}
@@ -160,6 +166,43 @@ function runningCallRow(ui: PaneElements, nowMs: number, call: RunningCall): Ren
     </Text>,
     <Text dimColor>{shortDurationText(nowMs - call.startedMs)}</Text>,
   )
+}
+
+/** The running background shells, newest first, then the newest that ended, each with its time. */
+function shellsGroup(ui: PaneElements, view: PaneView): RenderNode | undefined {
+  const { Box, Text } = ui
+  const { rows, moreRunningCount } = shellRows(view.backgroundShells, view.nowMs)
+  if (rows.length === 0) return undefined
+  const more = moreRunningCount > 0 ? <Text dimColor>{moreRunningCount} more running</Text> : undefined
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      {spreadRow(ui, <Text dimColor>Shells</Text>, more)}
+      {rows.map(row => {
+        const colour = shellStatusColour(row.status)
+        const figures = `${row.status} ${shortDurationText(row.durationMs)}`
+        const status =
+          colour === undefined ? <Text dimColor>{figures}</Text> : <Text color={colour}>{figures}</Text>
+        return <Box key={`shell:${row.id}`}>{spreadRow(ui, row.label, status)}</Box>
+      })}
+    </Box>
+  )
+}
+
+/** The colour of a running, completed or failed shell; `undefined` for one stopped or ended unheard. */
+function shellStatusColour(status: ShellRow['status']): Color | undefined {
+  switch (status) {
+    case 'running':
+      return BAR_COLOUR
+    case 'completed':
+      return DONE_COLOUR
+    case 'failed':
+      return FAILED_COLOUR
+    case 'stopped':
+    case 'ended':
+      return undefined
+    default:
+      return status satisfies never
+  }
 }
 
 /** The newest agents, newest first, each a button that shows its transcript. */

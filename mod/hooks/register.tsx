@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, ProcessSpawnResult, Register, Timer } from 'claude-code'
 
-import type { Job, ListedAgent, MachineSample, ProcessState, RunningCall, SessionTurn } from '../types'
+import type { BackgroundShell, Job, ListedAgent, MachineSample, ProcessState, RunningCall, SessionTurn } from '../types'
 import { parseSample, processStates, takeLines } from './machine'
 import type { FinishedJob } from './progress'
 import { PANE_COLUMNS, PANE_ID, PANE_TITLE, drawPane } from './pane'
@@ -34,6 +34,13 @@ import {
   toolArgumentText,
   usageHintText,
 } from './session'
+import {
+  endShellsNotInFlight,
+  hasRunningShell,
+  recordShellEnds,
+  recordShellStart,
+  taskNoticesIn,
+} from './shells'
 
 const COMMAND_NAME = 'progress'
 // A poll still running after this long is logged, once, as stuck.
@@ -94,6 +101,9 @@ const agents = atom({ plugin: 'shell-progress', key: 'agents' } as const, [], { 
 const agentCosts = atom({ plugin: 'shell-progress', key: 'agentCosts' } as const, [], {
   shape: 'agent-costs-1',
 })
+const backgroundShells = atom({ plugin: 'shell-progress', key: 'backgroundShells' } as const, [], {
+  shape: 'background-shells-1',
+})
 // Written only when it changes, so the prompt hint is drawn again once per
 // change rather than once a poll.
 const hintUsage = atom({ plugin: 'shell-progress', key: 'hintUsage' } as const, null)
@@ -117,6 +127,7 @@ export const register: Register = (on, options) => {
   })
 
   followSession(on)
+  followShells(on)
 
   on('command.run', { command: COMMAND_NAME }, async $ => {
     const opened = await $.ui.open(PANE_REQUEST)
@@ -140,6 +151,7 @@ export const register: Register = (on, options) => {
       readings,
       agentList,
       costs,
+      shells,
       machine,
       nowMs,
       usage,
@@ -155,6 +167,7 @@ export const register: Register = (on, options) => {
         read($, limitReadings),
         read($, agents),
         read($, agentCosts),
+        read($, backgroundShells),
         read($, machineReadings),
         $.clock.now(),
         $.session.usage(),
@@ -176,6 +189,7 @@ export const register: Register = (on, options) => {
       limitReadings: readings,
       agents: agentList,
       agentCosts: costs,
+      backgroundShells: shells,
       machineSample: machine?.current ?? null,
       processStates: processStates(jobList, machine, nowMs),
     })
@@ -258,6 +272,67 @@ function followSession(on: On): void {
     })
     return result
   })
+}
+
+/**
+ * Records the shell commands the main conversation moved to the background,
+ * and how each ended. No call lists them while they run, so a shell starts
+ * with its call's result, ends with its notification, and, where that is
+ * missed, ends at the first turn whose end no longer reports it in flight.
+ * A failure to store a record is logged, and the call, the prompt and the
+ * turn go on unchanged.
+ */
+function followShells(on: On): void {
+  on('tool.call', { tool: ['Bash', 'PowerShell'] }, async ($, e, next) => {
+    // The matcher already selects the shells; the check types the result.
+    if (e.agentId !== undefined || (e.tool !== 'Bash' && e.tool !== 'PowerShell')) return next(e)
+    const startedMs = await $.clock.now()
+    const result = await next(e)
+    if (result.deny !== undefined || result.isError === true) return result
+    const id = result.result.backgroundTaskId
+    if (id === undefined || id === '') return result
+    const shell: BackgroundShell = {
+      id,
+      tool: e.tool,
+      command: toolArgumentText(e.tool, e),
+      startedMs,
+      state: { kind: 'running' },
+    }
+    await update($, backgroundShells, shells => recordShellStart(shells, shell)).catch((error: unknown) =>
+      logFailedShellRecord($, error),
+    )
+    return result
+  })
+
+  // Only the engine stamps this origin, so a prompt the person typed, pasted
+  // or another plugin sent ends nothing, whatever text it carries.
+  on('prompt.submit', async ($, e, next) => {
+    if (e.origin.kind !== 'task-notification') return next(e)
+    const notices = taskNoticesIn(e.text)
+    if (notices.length > 0) {
+      const nowMs = await $.clock.now()
+      await update($, backgroundShells, shells => recordShellEnds(shells, notices, nowMs)).catch(
+        (error: unknown) => logFailedShellRecord($, error),
+      )
+    }
+    return next(e)
+  })
+
+  on('classic.Stop', async ($, e, next) => {
+    const inFlight = e.background_tasks
+    if (inFlight !== undefined) {
+      const inFlightIds = new Set(inFlight.map(task => task.id))
+      const nowMs = await $.clock.now()
+      await update($, backgroundShells, shells => endShellsNotInFlight(shells, inFlightIds, nowMs)).catch(
+        (error: unknown) => logFailedShellRecord($, error),
+      )
+    }
+    return next(e)
+  })
+}
+
+function logFailedShellRecord($: EngineInterface, error: unknown): void {
+  $.ui.log(`shell-progress: cannot record a background shell: ${errorMessage(error)}`)
 }
 
 function paneActions($: EngineInterface) {
@@ -371,6 +446,7 @@ function startPolling(
   const jobsFailure = failureLog($, `cannot poll ${dir}`)
   const agentsFailure = failureLog($, 'cannot list agents')
   const usageFailure = failureLog($, 'cannot read usage')
+  const shellsFailure = failureLog($, 'cannot read the background shells')
   const sampleWhile = machineSampler($)
   // Separate, so a hung job poll, agent list or usage reading cannot hold up
   // the others.
@@ -391,6 +467,14 @@ function startPolling(
   const tickUsage = unlessUnsettled($, 'a reading of usage', () =>
     pollHintUsage($).then(usageFailure.clear, usageFailure.record),
   )
+  // A running shell's time moves on between turns too, when no turn timer
+  // draws the pane again.
+  const tickShells = unlessUnsettled($, 'a reading of the background shells', () =>
+    read($, backgroundShells).then(shells => {
+      shellsFailure.clear()
+      if (hasRunningShell(shells)) $.ui.invalidate('ui.render')
+    }, shellsFailure.record),
+  )
 
   // The timer lives until the module reloads, which drops it with the
   // environment, so nothing needs to cancel it.
@@ -398,6 +482,7 @@ function startPolling(
     tickJobs()
     tickAgents()
     tickUsage()
+    tickShells()
   })
 }
 
