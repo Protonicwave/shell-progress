@@ -119,6 +119,14 @@ const agentInfo = (id: string, status: AgentStatus = 'running', description = `t
   description,
   type: 'Explore',
   status,
+  kind: 'local_agent',
+  taskStatus: 'running',
+  label: description,
+  startTime: 0,
+  cwd: '',
+  tokenCount: 0,
+  tokenSamples: [],
+  hasRow: true,
 })
 
 describe('mergeAgents', () => {
