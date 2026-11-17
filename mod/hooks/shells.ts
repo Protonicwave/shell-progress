@@ -14,7 +14,7 @@ const TASK_ID_PATTERN = /<task-id>([^<]+)<\/task-id>/
 const STATUS_PATTERN = /<status>([^<]+)<\/status>/
 
 /** A background task's notification: its id and the status word it gave, if any. */
-export type TaskNotice = {
+type TaskNotice = {
   readonly id: string
   readonly status: string | undefined
 }
@@ -24,26 +24,16 @@ export type ShellRow = {
   readonly id: string
   /** The command's first line, else the tool's name. */
   readonly label: string
-  readonly status: 'running' | ShellEnd
+  /** `ended` for a shell that ended without a known status. */
+  readonly status: 'running' | 'completed' | 'failed' | 'stopped' | 'ended'
   /** How long it has run, or ran. */
   readonly durationMs: number
 }
 
 /** The running shells newest first, then the newest ended ones, and how many running ones are left out. */
-export type ShellRows = {
+type ShellRows = {
   readonly rows: readonly ShellRow[]
   readonly moreRunningCount: number
-}
-
-/**
- * The background task id of a shell call's result: set when the command ran
- * on in the background, by its own request, by Ctrl+B or after a timeout.
- * `undefined` for a foreground call or a result of another shape.
- */
-export function backgroundTaskIdOf(result: unknown): string | undefined {
-  if (typeof result !== 'object' || result === null || !('backgroundTaskId' in result)) return undefined
-  const id = result.backgroundTaskId
-  return typeof id === 'string' && id !== '' ? id : undefined
 }
 
 /** Adds `shell` as the newest, in place of any earlier one with its id. */
@@ -67,8 +57,8 @@ export function taskNoticesIn(text: string): readonly TaskNotice[] {
 }
 
 /**
- * Ends each shell a notice names, at `nowMs`, when it is running or only
- * known to be gone. A notice for an id the mod never recorded, or for a shell
+ * Ends each shell a notice names, at `nowMs`, when it is running or ended
+ * unheard. A notice for an id the mod never recorded, or for a shell
  * already ended by a notice, changes nothing. Gives back `shells` itself when
  * nothing changed.
  */
@@ -89,11 +79,11 @@ export function recordShellEnds(
 }
 
 /**
- * Marks gone, at `nowMs`, each running shell whose id is not in `inFlightIds`,
- * the background work a turn's end reported still running. Gives back
- * `shells` itself when nothing changed.
+ * Ends unheard, at `nowMs`, each running shell whose id is not in
+ * `inFlightIds`, the background work a turn's end reported still running.
+ * Gives back `shells` itself when nothing changed.
  */
-export function settleShells(
+export function endShellsNotInFlight(
   shells: readonly BackgroundShell[],
   inFlightIds: ReadonlySet<string>,
   nowMs: number,
@@ -102,7 +92,7 @@ export function settleShells(
   const updated = shells.map(shell => {
     if (shell.state.kind !== 'running' || inFlightIds.has(shell.id)) return shell
     hasChanged = true
-    return { ...shell, state: { kind: 'gone', endedMs: nowMs } } as const
+    return { ...shell, state: { kind: 'unheard', endedMs: nowMs } } as const
   })
   return hasChanged ? updated : shells
 }
@@ -129,10 +119,12 @@ function shellRow(shell: BackgroundShell, nowMs: number): ShellRow {
   switch (state.kind) {
     case 'running':
       return { id: shell.id, label, status: 'running', durationMs: nowMs - shell.startedMs }
-    case 'gone':
+    case 'unheard':
       return { id: shell.id, label, status: 'ended', durationMs: state.endedMs - shell.startedMs }
-    case 'ended':
-      return { id: shell.id, label, status: state.end, durationMs: state.endedMs - shell.startedMs }
+    case 'ended': {
+      const status = state.end === 'unknown' ? 'ended' : state.end
+      return { id: shell.id, label, status, durationMs: state.endedMs - shell.startedMs }
+    }
     default:
       return state satisfies never
   }
@@ -147,7 +139,7 @@ function shellEndOf(status: string | undefined): ShellEnd {
     case 'killed':
       return 'stopped'
     default:
-      return 'ended'
+      return 'unknown'
   }
 }
 

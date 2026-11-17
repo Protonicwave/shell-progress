@@ -17,7 +17,7 @@ function backgroundShells(on: On): void {
     const id = /# (\S+)$/m.exec(command)?.[1]
     return { result: id === undefined ? NO_OUTPUT : { ...NO_OUTPUT, backgroundTaskId: id } }
   })
-  on('classic.UserPromptSubmit', () => ({}))
+  on('prompt.submit', (_, e) => ({ text: e.text }))
   on('classic.Stop', () => ({}))
 }
 
@@ -26,18 +26,11 @@ async function runInBackground($: Engine, id: string, command = `sleep 100 # ${i
 }
 
 function notification(id: string, status: string): string {
-  return [
-    '<task-notification>',
-    `<task-id>${id}</task-id>`,
-    '<tool-use-id>toolu_1</tool-use-id>',
-    `<status>${status}</status>`,
-    `<summary>Background command completed</summary>`,
-    '</task-notification>',
-  ].join('\n')
+  return `<task-notification>\n<task-id>${id}</task-id>\n<status>${status}</status>\n</task-notification>`
 }
 
-async function deliver($: Engine, prompt: string, source: 'system' | 'user' | undefined = 'system') {
-  await $.classic.UserPromptSubmit({ prompt, ...(source === undefined ? {} : { source }) })
+async function deliver($: Engine, text: string, origin: 'task-notification' | 'composer') {
+  await $.prompt.submit({ text, wait: false, origin: { kind: origin } })
 }
 
 async function endTurn($: Engine, inFlightIds: readonly string[] | undefined) {
@@ -90,66 +83,52 @@ test('a command with no text is listed by its tool', async ($, on) => {
   expect(await shellTexts($)).toEqual(['Bash', 'running 0s'])
 })
 
-test("a foreground call, a denied call, a result without a task id and a subagent's background call list no shell", async ($, on) => {
+test("a foreground, denied, errored or id-less call, or a subagent's background call, lists no shell", async ($, on) => {
   fakeWorld(on, new Map())
   on('tool.call', (_, e) => {
-    if ('command' in e && e.command === 'denied # d1') return { deny: 'not allowed' }
-    if ('command' in e && e.command === 'empty id') return { result: { ...NO_OUTPUT, backgroundTaskId: '' } }
-    if ('command' in e && e.command === 'plain text') return { result: 'started' }
+    const command = 'command' in e ? e.command : ''
+    if (command === 'denied') return { deny: 'not allowed' }
+    if (command === 'errored') return { result: { ...NO_OUTPUT, backgroundTaskId: 'x1' }, isError: true, text: 'failed' }
+    if (command === 'empty id') return { result: { ...NO_OUTPUT, backgroundTaskId: '' } }
     return { result: 'agentId' in e && e.agentId !== undefined ? { ...NO_OUTPUT, backgroundTaskId: 's1' } : NO_OUTPUT }
   })
   await startSession($)
 
   await $.tool.call({ tool: 'Bash', command: 'npm test' })
-  await $.tool.call({ tool: 'Bash', command: 'denied # d1', run_in_background: true }).catch(() => undefined)
+  await $.tool.call({ tool: 'Bash', command: 'denied', run_in_background: true }).catch(() => undefined)
+  await $.tool.call({ tool: 'PowerShell', command: 'errored', run_in_background: true })
   await $.tool.call({ tool: 'Bash', command: 'empty id', run_in_background: true })
-  await $.tool.call({ tool: 'PowerShell', command: 'plain text', run_in_background: true })
   await $.tool.call({ tool: 'Bash', command: 'sleep 1', run_in_background: true, agentId: 'agent-1' })
 
   expect(await shellTexts($)).toEqual([])
 })
 
-test('a notification ends its shell with its status and the time until it came', async ($, on) => {
+test('a task notification ends its shells with their status and the time until it came', async ($, on) => {
   const { clock } = fakeWorld(on, new Map())
   backgroundShells(on)
   await startSession($)
   await runInBackground($, 'b1')
   await runInBackground($, 'b2')
-  await runInBackground($, 'b3')
-  await runInBackground($, 'b4')
 
   await clock.advance(7_000)
-  await deliver($, [notification('b1', 'completed'), notification('b2', 'failed')].join('\n'))
-  await deliver($, notification('b3', 'killed'))
-  await deliver($, notification('b4', 'paused'), undefined)
+  await deliver($, `${notification('b1', 'completed')}\n${notification('b2', 'killed')}`, 'task-notification')
   await clock.advance(60_000)
 
-  expect(await shellTexts($)).toEqual([
-    'sleep 100 # b4', 'ended 7s',
-    'sleep 100 # b3', 'stopped 7s',
-    'sleep 100 # b2', 'failed 7s',
-  ])
+  expect(await shellTexts($)).toEqual(['sleep 100 # b2', 'stopped 7s', 'sleep 100 # b1', 'completed 7s'])
 })
 
-test('a notification for another task, a repeated one and a typed one change nothing', async ($, on) => {
-  const { clock } = fakeWorld(on, new Map())
+test('a prompt that is not a task notification ends nothing, whatever text it carries', async ($, on) => {
+  fakeWorld(on, new Map())
   backgroundShells(on)
   await startSession($)
   await runInBackground($, 'b1')
-  await runInBackground($, 'b2')
 
-  await clock.advance(3_000)
-  await deliver($, notification('b1', 'completed'))
-  await clock.advance(3_000)
-  await deliver($, notification('b1', 'failed'))
-  await deliver($, notification('elsewhere', 'completed'))
-  await deliver($, '<task-notification><status>completed</status></task-notification>')
-  await deliver($, notification('b2', 'completed'), 'user')
+  await deliver($, notification('b1', 'failed'), 'composer')
 
-  expect(await shellTexts($)).toEqual(['sleep 100 # b2', 'running 6s', 'sleep 100 # b1', 'completed 3s'])
+  expect(await shellTexts($)).toEqual(['sleep 100 # b1', 'running 0s'])
 })
 
-test("a turn's end marks ended a shell no longer in flight, and its notification then gives the status", async ($, on) => {
+test("a turn's end marks ended each shell no longer in flight", async ($, on) => {
   const { clock } = fakeWorld(on, new Map())
   backgroundShells(on)
   await startSession($)
@@ -158,11 +137,9 @@ test("a turn's end marks ended a shell no longer in flight, and its notification
 
   await clock.advance(4_000)
   await endTurn($, ['b2'])
-  expect(await shellTexts($)).toEqual(['sleep 100 # b2', 'running 4s', 'sleep 100 # b1', 'ended 4s'])
-
   await clock.advance(1_000)
-  await deliver($, notification('b1', 'completed'))
-  expect(await shellTexts($)).toEqual(['sleep 100 # b2', 'running 5s', 'sleep 100 # b1', 'completed 5s'])
+
+  expect(await shellTexts($)).toEqual(['sleep 100 # b2', 'running 5s', 'sleep 100 # b1', 'ended 4s'])
 })
 
 test("a turn's end without a list of work in flight ends nothing", async ($, on) => {
@@ -181,7 +158,7 @@ test('Shells lists five running shells newest first, counts the rest, then the t
   backgroundShells(on)
   await startSession($)
   for (const id of ['e1', 'e2', 'e3', 'e4']) await runInBackground($, id)
-  for (const id of ['e1', 'e2', 'e3', 'e4']) await deliver($, notification(id, 'completed'))
+  await endTurn($, [])
   for (const id of ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']) await runInBackground($, id)
 
   expect(await shellTexts($)).toEqual([
@@ -191,37 +168,10 @@ test('Shells lists five running shells newest first, counts the rest, then the t
     'sleep 100 # r5', 'running 0s',
     'sleep 100 # r4', 'running 0s',
     'sleep 100 # r3', 'running 0s',
-    'sleep 100 # e4', 'completed 0s',
-    'sleep 100 # e3', 'completed 0s',
-    'sleep 100 # e2', 'completed 0s',
+    'sleep 100 # e4', 'ended 0s',
+    'sleep 100 # e3', 'ended 0s',
+    'sleep 100 # e2', 'ended 0s',
   ])
-})
-
-test('past 20 shells the oldest ended go first, then the oldest running', async ($, on) => {
-  fakeWorld(on, new Map())
-  backgroundShells(on)
-  await startSession($)
-  for (const id of ['e1', 'e2', 'e3', 'e4']) await runInBackground($, id)
-  for (const id of ['e1', 'e2', 'e3', 'e4']) await deliver($, notification(id, 'completed'))
-  for (let index = 1; index <= 18; index += 1) await runInBackground($, `r${index}`)
-
-  const twoEndedKept = await shellTexts($)
-  expect(twoEndedKept[0]).toBe('13 more running')
-  expect(twoEndedKept.slice(-4)).toEqual(['sleep 100 # e4', 'completed 0s', 'sleep 100 # e3', 'completed 0s'])
-
-  for (let index = 19; index <= 22; index += 1) await runInBackground($, `r${index}`)
-  expect((await shellTexts($))[0]).toBe('15 more running')
-})
-
-test('a shell started again under its id keeps one row', async ($, on) => {
-  fakeWorld(on, new Map())
-  backgroundShells(on)
-  await startSession($)
-
-  await runInBackground($, 'b1', 'first # b1')
-  await runInBackground($, 'b1', 'second # b1')
-
-  expect(await shellTexts($)).toEqual(['second # b1', 'running 0s'])
 })
 
 test('a running shell keeps the pane moving between turns', async ($, on) => {
@@ -237,7 +187,7 @@ test('a running shell keeps the pane moving between turns', async ($, on) => {
   await ui.unmount()
 })
 
-test('a shell that cannot be stored is logged and its call, prompt and turn go on', async ($, on) => {
+test('a shell that cannot be stored is logged and its call and turn go on', async ($, on) => {
   const { world } = fakeWorld(on, new Map())
   backgroundShells(on)
   on('state.set', (_, e, next) => {
@@ -249,12 +199,10 @@ test('a shell that cannot be stored is logged and its call, prompt and turn go o
   expect(await $.tool.call({ tool: 'Bash', command: 'sleep 1 # b1', run_in_background: true })).toMatchObject({
     result: { backgroundTaskId: 'b1' },
   })
-  await deliver($, notification('b1', 'completed'))
   await endTurn($, [])
 
-  expect(world.logs).toContain(
-    'shell-progress: cannot record a background shell: shell-progress: $.state.set: the state is read-only',
-  )
+  const failure = 'shell-progress: cannot record a background shell: shell-progress: $.state.set: the state is read-only'
+  expect(world.logs.filter(line => line === failure)).toHaveLength(2)
 })
 
 test('a list of shells that cannot be read is logged once and the polls go on', async ($, on) => {

@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On, PluginOptions, ProcessSpawnResult, Register, Timer, ToolCallResult } from 'claude-code'
+import type { EngineInterface, On, PluginOptions, ProcessSpawnResult, Register, Timer } from 'claude-code'
 
 import type { BackgroundShell, Job, ListedAgent, MachineSample, ProcessState, RunningCall, SessionTurn } from '../types'
 import { parseSample, processStates, takeLines } from './machine'
@@ -35,17 +35,14 @@ import {
   usageHintText,
 } from './session'
 import {
-  backgroundTaskIdOf,
+  endShellsNotInFlight,
   hasRunningShell,
   recordShellEnds,
   recordShellStart,
-  settleShells,
   taskNoticesIn,
 } from './shells'
 
 const COMMAND_NAME = 'progress'
-// What a classic UserPromptSubmit names as the source of a task notification.
-const NOTIFICATION_SOURCE = 'system'
 // A poll still running after this long is logged, once, as stuck.
 const STUCK_POLL_MS = 30_000
 const DISMISSED_STORE_KEY = 'dismissedJobs'
@@ -282,36 +279,40 @@ function followSession(on: On): void {
  * and how each ended. No call lists them while they run, so a shell starts
  * with its call's result, ends with its notification, and, where that is
  * missed, ends at the first turn whose end no longer reports it in flight.
- * A record that cannot be stored costs only its row: the call, the prompt
- * and the turn go on unchanged.
+ * A failure to store a record is logged, and the call, the prompt and the
+ * turn go on unchanged.
  */
 function followShells(on: On): void {
-  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    if (e.agentId !== undefined) return next(e)
+  on('tool.call', { tool: ['Bash', 'PowerShell'] }, async ($, e, next) => {
+    // The matcher already selects the shells; the check types the result.
+    if (e.agentId !== undefined || (e.tool !== 'Bash' && e.tool !== 'PowerShell')) return next(e)
     const startedMs = await $.clock.now()
     const result = await next(e)
-    await recordBackgroundShell($, e.tool, toolArgumentText(e.tool, e), startedMs, result)
-    return result
-  })
-  on('tool.call', { tool: 'PowerShell' }, async ($, e, next) => {
-    if (e.agentId !== undefined) return next(e)
-    const startedMs = await $.clock.now()
-    const result = await next(e)
-    await recordBackgroundShell($, e.tool, toolArgumentText(e.tool, e), startedMs, result)
+    if (result.deny !== undefined || result.isError === true) return result
+    const id = result.result.backgroundTaskId
+    if (id === undefined || id === '') return result
+    const shell: BackgroundShell = {
+      id,
+      tool: e.tool,
+      command: toolArgumentText(e.tool, e),
+      startedMs,
+      state: { kind: 'running' },
+    }
+    await update($, backgroundShells, shells => recordShellStart(shells, shell)).catch((error: unknown) =>
+      logFailedShellRecord($, error),
+    )
     return result
   })
 
-  // The classic event, not `prompt.submit`, since a test can raise it with the
-  // source a notification has. A prompt the person or the SDK sent is left
-  // alone, so pasted notification text ends nothing; a source left out, as
-  // the engine may while the field rolls out, is read.
-  on('classic.UserPromptSubmit', async ($, e, next) => {
-    if (e.source !== undefined && e.source !== NOTIFICATION_SOURCE) return next(e)
-    const notices = taskNoticesIn(e.prompt)
+  // Only the engine stamps this origin, so a prompt the person typed, pasted
+  // or another plugin sent ends nothing, whatever text it carries.
+  on('prompt.submit', async ($, e, next) => {
+    if (e.origin.kind !== 'task-notification') return next(e)
+    const notices = taskNoticesIn(e.text)
     if (notices.length > 0) {
       const nowMs = await $.clock.now()
       await update($, backgroundShells, shells => recordShellEnds(shells, notices, nowMs)).catch(
-        shellRecordFailure($),
+        (error: unknown) => logFailedShellRecord($, error),
       )
     }
     return next(e)
@@ -322,31 +323,16 @@ function followShells(on: On): void {
     if (inFlight !== undefined) {
       const inFlightIds = new Set(inFlight.map(task => task.id))
       const nowMs = await $.clock.now()
-      await update($, backgroundShells, shells => settleShells(shells, inFlightIds, nowMs)).catch(
-        shellRecordFailure($),
+      await update($, backgroundShells, shells => endShellsNotInFlight(shells, inFlightIds, nowMs)).catch(
+        (error: unknown) => logFailedShellRecord($, error),
       )
     }
     return next(e)
   })
 }
 
-/** Records the call as a running shell when its result names a background task. */
-async function recordBackgroundShell(
-  $: EngineInterface,
-  tool: string,
-  command: string,
-  startedMs: number,
-  result: ToolCallResult,
-): Promise<void> {
-  if (result.deny !== undefined) return
-  const id = backgroundTaskIdOf(result.result)
-  if (id === undefined) return
-  const shell: BackgroundShell = { id, tool, command, startedMs, state: { kind: 'running' } }
-  await update($, backgroundShells, shells => recordShellStart(shells, shell)).catch(shellRecordFailure($))
-}
-
-function shellRecordFailure($: EngineInterface): (error: unknown) => void {
-  return error => $.ui.log(`shell-progress: cannot record a background shell: ${errorMessage(error)}`)
+function logFailedShellRecord($: EngineInterface, error: unknown): void {
+  $.ui.log(`shell-progress: cannot record a background shell: ${errorMessage(error)}`)
 }
 
 function paneActions($: EngineInterface) {
