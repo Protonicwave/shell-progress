@@ -71,6 +71,25 @@ export type ListedAgent = {
   readonly status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed'
 }
 
+/** How a background shell ended, as its notification said; `ended` for a word the mod does not know. */
+export type ShellEnd = 'completed' | 'failed' | 'stopped' | 'ended'
+
+/** A shell command the main conversation moved to the background. */
+export type BackgroundShell = {
+  /** The call's `backgroundTaskId`, which its notification names as `<task-id>`. */
+  readonly id: string
+  readonly tool: string
+  /** The command's first line, or empty. */
+  readonly command: string
+  /** When the call started, which for a command backgrounded mid-run is before it was. */
+  readonly startedMs: number
+  readonly state:
+    | { readonly kind: 'running' }
+    /** Missing from the in-flight list at a turn's end before its notification came. */
+    | { readonly kind: 'gone'; readonly endedMs: number }
+    | { readonly kind: 'ended'; readonly end: ShellEnd; readonly endedMs: number }
+}
+
 /** What a finished agent took, from the Agent tool's result. */
 export type AgentCost = {
   /** The agent's id, the same in the Agent tool's result and `$.agent.list()`. */
@@ -170,6 +189,8 @@ declare module 'claude-code' {
       agents: Shaped<readonly ListedAgent[]>
       /** Oldest first. */
       agentCosts: Shaped<readonly AgentCost[]>
+      /** Oldest first. */
+      backgroundShells: Shaped<readonly BackgroundShell[]>
       /** The usage figures the prompt hint ends with, or `null` while it shows none. */
       hintUsage: string | null
       /** `null` before the sampler's first reading. */

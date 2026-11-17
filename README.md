@@ -133,14 +133,30 @@ in.
 The pane is titled This session. Its first line shows the tool call Claude is
 running, such as `Bash npm test` or `PowerShell Get-ChildItem`, with how long it
 has run, or `Thinking` between calls, or once the turn ends, `Waiting for you`
-and how long the turn took. While a turn runs the header shows its time. If the mod is reloaded
-during a turn, that time stops moving until the next turn starts, unless a
-running job keeps the pane redrawing. Below come the jobs, then
-Agents, then Recent: the last three calls, newest first, each with how long it
-took, and in red when it failed. Only the main conversation's calls are shown,
+and how long the turn took. While a turn runs the header shows its time. If the
+mod is reloaded during a turn, that time stops moving until the next turn
+starts, unless a running job or background shell keeps the pane redrawing.
+Below come the jobs, then Shells, then Agents, then Recent: the last three
+calls, newest first, each with how long it took, and in red when it failed. Only the main conversation's calls are shown,
 not a subagent's. A call another mod makes through `$.tool.call` on the main
 conversation is shown as if Claude had made it. A group with nothing in it is
 not drawn.
+
+Shells lists the shell commands Claude moved to the background in this
+session: those it ran in the background, those you sent there with Ctrl+B and
+those that ran past their timeout. Each row gives the command's first line and
+`running` with how long it has run, or how it ended, `completed`, `failed` or
+`stopped`, with how long it took. The running ones come first, newest first,
+and past five the rest are counted; under them come the three newest that
+ended. While one runs, its time moves on between turns too. Only the main
+conversation's shells are listed, not a subagent's.
+
+Claude Code lists no background shells while they run, so a shell ends in the
+pane when its notification reaches the session, and the time it took is
+counted to then. A shell whose notification the mod did not see, for example
+because the mod was reloaded, reads `ended` once a turn finishes without it
+among the work still in flight; a notification that comes later still gives
+its status.
 
 Agents lists the session's subagents and teammates, newest first, each with its
 task and whether it is running, waiting, completed or failed. Past five, the
